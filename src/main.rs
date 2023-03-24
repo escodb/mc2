@@ -3,4 +3,5 @@ fn main() {
 }
 
 mod graph;
+mod path;
 mod store;
