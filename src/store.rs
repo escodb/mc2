@@ -116,48 +116,48 @@ mod tests {
     #[test]
     fn stores_a_new_value() {
         let mut store = Store::new();
-        assert_eq!(store.write("x", None, 51), Some(1));
+        assert_eq!(store.write("x", None, 'a'), Some(1));
         assert_eq!(store.seq, 1);
-        assert_eq!(store.read("x"), Some((1, 51)));
+        assert_eq!(store.read("x"), Some((1, 'a')));
     }
 
     #[test]
     fn does_not_update_a_value_without_a_rev() {
         let mut store = Store::new();
-        store.write("x", None, 51);
+        store.write("x", None, 'a');
 
-        assert_eq!(store.write("x", None, 52), None);
+        assert_eq!(store.write("x", None, 'b'), None);
         assert_eq!(store.seq, 1);
-        assert_eq!(store.read("x"), Some((1, 51)));
+        assert_eq!(store.read("x"), Some((1, 'a')));
     }
 
     #[test]
     fn does_not_update_a_value_with_a_bad_rev() {
         let mut store = Store::new();
-        let rev = store.write("x", None, 51).unwrap();
+        let rev = store.write("x", None, 'a').unwrap();
 
-        assert_eq!(store.write("x", Some(rev + 1), 52), None);
+        assert_eq!(store.write("x", Some(rev + 1), 'b'), None);
         assert_eq!(store.seq, 1);
-        assert_eq!(store.read("x"), Some((1, 51)));
+        assert_eq!(store.read("x"), Some((1, 'a')));
     }
 
     #[test]
     fn updates_a_value_with_a_matching_rev() {
         let mut store = Store::new();
-        let rev = store.write("x", None, 51).unwrap();
+        let rev = store.write("x", None, 'a').unwrap();
 
-        assert_eq!(store.write("x", Some(rev), 52), Some(2));
+        assert_eq!(store.write("x", Some(rev), 'b'), Some(2));
         assert_eq!(store.seq, 2);
-        assert_eq!(store.read("x"), Some((2, 52)));
+        assert_eq!(store.read("x"), Some((2, 'b')));
     }
 
     #[test]
     fn returns_all_the_keys_in_the_store() {
         let mut store = Store::new();
 
-        store.write("/", None, 51);
-        store.write("/path/", None, 52);
-        store.write("/z/doc.json", None, 53);
+        store.write("/", None, 'a');
+        store.write("/path/", None, 'b');
+        store.write("/z/doc.json", None, 'c');
 
         assert_eq!(store.keys(), vec!["/", "/path/", "/z/doc.json"]);
     }
@@ -175,8 +175,8 @@ mod tests {
         let store = RefCell::new(Store::new());
         let mut cache = Cache::new(&store);
 
-        assert_eq!(store.borrow_mut().write("x", None, 51), Some(1));
-        assert_eq!(cache.read("x"), Some(51));
+        assert_eq!(store.borrow_mut().write("x", None, 'a'), Some(1));
+        assert_eq!(cache.read("x"), Some('a'));
     }
 
     #[test]
@@ -185,7 +185,7 @@ mod tests {
         let mut cache = Cache::new(&store);
 
         assert_eq!(cache.read("x"), None);
-        assert_eq!(store.borrow_mut().write("x", None, 51), Some(1));
+        assert_eq!(store.borrow_mut().write("x", None, 'a'), Some(1));
         assert_eq!(cache.read("x"), None);
     }
 
@@ -194,10 +194,10 @@ mod tests {
         let store = RefCell::new(Store::new());
         let mut cache = Cache::new(&store);
 
-        assert_eq!(cache.write("x", 51), true);
+        assert_eq!(cache.write("x", 'a'), true);
 
-        assert_eq!(store.borrow().read("x"), Some((1, 51)));
-        assert_eq!(cache.read("x"), Some(51));
+        assert_eq!(store.borrow().read("x"), Some((1, 'a')));
+        assert_eq!(cache.read("x"), Some('a'));
     }
 
     #[test]
@@ -205,12 +205,12 @@ mod tests {
         let store = RefCell::new(Store::new());
         let mut cache = Cache::new(&store);
 
-        assert_eq!(cache.write("x", 51), true);
-        assert_eq!(cache.write("x", 52), true);
-        assert_eq!(cache.write("x", 53), true);
+        assert_eq!(cache.write("x", 'a'), true);
+        assert_eq!(cache.write("x", 'b'), true);
+        assert_eq!(cache.write("x", 'c'), true);
 
-        assert_eq!(store.borrow().read("x"), Some((3, 53)));
-        assert_eq!(cache.read("x"), Some(53));
+        assert_eq!(store.borrow().read("x"), Some((3, 'c')));
+        assert_eq!(cache.read("x"), Some('c'));
     }
 
     #[test]
@@ -218,11 +218,11 @@ mod tests {
         let store = RefCell::new(Store::new());
         let mut cache = Cache::new(&store);
 
-        assert_eq!(store.borrow_mut().write("x", None, 51), Some(1));
-        assert_eq!(cache.write("x", 52), false);
+        assert_eq!(store.borrow_mut().write("x", None, 'a'), Some(1));
+        assert_eq!(cache.write("x", 'b'), false);
 
-        assert_eq!(store.borrow().read("x"), Some((1, 51)));
-        assert_eq!(cache.read("x"), Some(51));
+        assert_eq!(store.borrow().read("x"), Some((1, 'a')));
+        assert_eq!(cache.read("x"), Some('a'));
     }
 
     #[test]
@@ -230,12 +230,12 @@ mod tests {
         let store = RefCell::new(Store::new());
         let mut cache = Cache::new(&store);
 
-        assert_eq!(cache.write("x", 51), true);
+        assert_eq!(cache.write("x", 'a'), true);
 
-        assert_eq!(store.borrow_mut().write("x", Some(1), 53), Some(2));
-        assert_eq!(cache.write("x", 52), false);
+        assert_eq!(store.borrow_mut().write("x", Some(1), 'c'), Some(2));
+        assert_eq!(cache.write("x", 'b'), false);
 
-        assert_eq!(store.borrow().read("x"), Some((2, 53)));
+        assert_eq!(store.borrow().read("x"), Some((2, 'c')));
     }
 
     #[test]
@@ -243,15 +243,15 @@ mod tests {
         let store = RefCell::new(Store::new());
         let mut cache = Cache::new(&store);
 
-        assert_eq!(cache.write("x", 51), true);
+        assert_eq!(cache.write("x", 'a'), true);
 
-        assert_eq!(store.borrow_mut().write("x", Some(1), 53), Some(2));
-        assert_eq!(cache.write("x", 52), false);
+        assert_eq!(store.borrow_mut().write("x", Some(1), 'c'), Some(2));
+        assert_eq!(cache.write("x", 'b'), false);
 
-        assert_eq!(cache.read("x"), Some(53));
-        assert_eq!(cache.write("x", 52), true);
+        assert_eq!(cache.read("x"), Some('c'));
+        assert_eq!(cache.write("x", 'b'), true);
 
-        assert_eq!(store.borrow().read("x"), Some((3, 52)));
-        assert_eq!(cache.read("x"), Some(52));
+        assert_eq!(store.borrow().read("x"), Some((3, 'b')));
+        assert_eq!(cache.read("x"), Some('b'));
     }
 }
