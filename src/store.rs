@@ -152,6 +152,17 @@ mod tests {
     }
 
     #[test]
+    fn returns_a_copy_of_the_stored_value() {
+        let mut store = Store::new();
+        store.write("x", None, vec![4, 5, 6]);
+
+        let (_, mut a) = store.read("x").unwrap();
+        a.push(7);
+
+        assert_eq!(store.read("x"), Some((1, vec![4, 5, 6])));
+    }
+
+    #[test]
     fn returns_all_the_keys_in_the_store() {
         let mut store = Store::new();
 
@@ -177,6 +188,19 @@ mod tests {
 
         assert_eq!(store.borrow_mut().write("x", None, 'a'), Some(1));
         assert_eq!(cache.read("x"), Some('a'));
+    }
+
+    #[test]
+    fn returns_a_copy_of_the_cached_value() {
+        let store = RefCell::new(Store::new());
+        let mut cache = Cache::new(&store);
+
+        cache.write("x", vec![4, 5, 6]);
+
+        let mut a = cache.read("x").unwrap();
+        a.push(7);
+
+        assert_eq!(cache.read("x"), Some(vec![4, 5, 6]));
     }
 
     #[test]
@@ -253,5 +277,21 @@ mod tests {
 
         assert_eq!(store.borrow().read("x"), Some((3, 'b')));
         assert_eq!(cache.read("x"), Some('b'));
+    }
+
+    #[test]
+    fn allows_multiple_clients_to_mutate_the_store() {
+        let store = RefCell::new(Store::new());
+        let mut a = Cache::new(&store);
+        let mut b = Cache::new(&store);
+
+        assert_eq!(a.write("x", 'a'), true);
+        assert_eq!(b.write("y", 'b'), true);
+
+        assert_eq!(a.write("y", 'a'), false);
+        assert_eq!(b.write("x", 'b'), false);
+
+        assert_eq!(a.read("y"), Some('b'));
+        assert_eq!(b.read("x"), Some('a'));
     }
 }
