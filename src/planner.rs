@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -5,10 +7,10 @@ use crate::graph::{Graph, Id};
 use crate::path::Path;
 
 #[derive(PartialEq)]
-struct Act<T> {
-    client_id: String,
-    path: Path,
-    op: Op<T>,
+pub struct Act<T> {
+    pub client_id: String,
+    pub path: Path,
+    pub op: Op<T>,
 }
 
 impl<T> Act<T> {
@@ -38,7 +40,7 @@ impl<T> fmt::Debug for Act<T> {
     }
 }
 
-enum Op<T> {
+pub enum Op<T> {
     Get,
     Put(Box<dyn Fn(Option<T>) -> Option<T>>),
     Rm,
@@ -61,30 +63,34 @@ impl<T> PartialEq for Op<T> {
     }
 }
 
-struct Planner<T> {
+pub struct Planner<T> {
     graph: Graph<Act<T>>,
     clients: BTreeSet<String>,
 }
 
 impl<T> Planner<T> {
-    fn new() -> Planner<T> {
+    pub fn new() -> Planner<T> {
         Planner {
             graph: Graph::new(),
             clients: BTreeSet::new(),
         }
     }
 
-    fn client(&mut self, id: &str) -> Client<T> {
+    pub fn client(&mut self, id: &str) -> Client<T> {
         self.clients.insert(id.into());
         Client::new(&mut self.graph, id)
     }
 
-    fn clients(&self) -> impl Iterator<Item = &str> {
+    pub fn clients(&self) -> impl Iterator<Item = &str> {
         self.clients.iter().map(|s| s.as_ref())
+    }
+
+    pub fn orderings(&self) -> impl Iterator<Item = Vec<&Act<T>>> {
+        self.graph.orderings()
     }
 }
 
-struct Client<'a, T> {
+pub struct Client<'a, T> {
     id: String,
     graph: &'a mut Graph<Act<T>>,
 }
@@ -113,7 +119,7 @@ impl<'a, T> Client<'a, T> {
         reads
     }
 
-    fn update<F>(&mut self, key: &str, update: F)
+    pub fn update<F>(&mut self, key: &str, update: F)
     where
         F: Fn(Option<T>) -> Option<T> + 'static,
     {
@@ -132,7 +138,7 @@ impl<'a, T> Client<'a, T> {
         self.graph.add(&links, put);
     }
 
-    fn remove(&mut self, key: &str) {
+    pub fn remove(&mut self, key: &str) {
         let path = Path::from(key);
         let reads = self.do_reads(&path);
 
