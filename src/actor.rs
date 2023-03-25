@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
+use crate::path::Path;
 use crate::store::{Cache, Store};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -20,6 +21,7 @@ impl<T> Db<T> {
 pub struct Actor<'a, T> {
     cache: Cache<'a, Db<T>>,
     crashed: bool,
+    unlinks: BTreeSet<String>,
 }
 
 impl<T> Actor<'_, T>
@@ -30,6 +32,7 @@ where
         Actor {
             cache: Cache::new(store),
             crashed: false,
+            unlinks: BTreeSet::new(),
         }
     }
 
@@ -55,6 +58,27 @@ where
         }
     }
 
+    pub fn rm(&mut self, path: &str) {
+        if self.crashed || self.get(path).is_none() {
+            return;
+        }
+
+        if !self.cache.remove(path) {
+            self.crashed = true;
+            return;
+        }
+
+        self.unlinks = BTreeSet::new();
+
+        for (dir, name) in Path::from(path).links().rev() {
+            self.unlinks.insert(dir.into());
+
+            if self.list(dir) != Some(BTreeSet::from([name.into()])) {
+                break;
+            }
+        }
+    }
+
     pub fn list(&mut self, path: &str) -> Option<BTreeSet<String>> {
         if self.crashed {
             return None;
@@ -70,6 +94,14 @@ where
         if !self.crashed {
             let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
             entries.insert(entry.into());
+            self.write(path, Db::Dir(entries));
+        }
+    }
+
+    pub fn unlink(&mut self, path: &str, entry: &str) {
+        if !self.crashed && self.unlinks.contains(path) {
+            let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
+            entries.remove(entry);
             self.write(path, Db::Dir(entries));
         }
     }
@@ -227,5 +259,84 @@ mod tests {
     #[test]
     fn does_not_skip_creating_links_that_do_not_exist() {
         // todo
+    }
+
+    #[test]
+    fn removes_a_document() {
+        let store = make_store();
+        let mut actor = Actor::new(&store);
+
+        actor.rm(X_PATH);
+
+        let rec = store.borrow().read(X_PATH);
+        assert_eq!(rec, None);
+    }
+
+    #[test]
+    fn allows_empty_parent_directories_to_be_removed() {
+        let store = make_store();
+        let mut actor = Actor::new(&store);
+
+        actor.rm("/path/to/y.json");
+        actor.unlink("/path/to/", "y.json");
+        actor.unlink("/path/", "to/");
+        actor.unlink("/", "path/");
+
+        assert_eq!(
+            store.borrow().read("/"),
+            Some((1, Db::dir_from(&["path/"])))
+        );
+        assert_eq!(
+            store.borrow().read("/path/"),
+            Some((2, Db::dir_from(&["x.json"])))
+        );
+        assert_eq!(
+            store.borrow().read("/path/to/"),
+            Some((2, Db::dir_from(&[])))
+        );
+        assert_eq!(store.borrow().read("/path/to/y.json"), None);
+    }
+
+    #[test]
+    fn prevents_non_empty_parent_directories_being_removed() {
+        let store = make_store();
+        let mut actor = Actor::new(&store);
+
+        actor.rm("/path/x.json");
+        actor.unlink("/path/", "x.json");
+        actor.unlink("/", "path/");
+
+        assert_eq!(
+            store.borrow().read("/"),
+            Some((1, Db::dir_from(&["path/"])))
+        );
+        assert_eq!(
+            store.borrow().read("/path/"),
+            Some((2, Db::dir_from(&["to/"])))
+        );
+        assert_eq!(store.borrow().read("/path/x.json"), None);
+    }
+
+    #[test]
+    fn does_not_decide_to_remove_directories_by_default() {
+        let store = make_store();
+        let mut actor = Actor::new(&store);
+
+        actor.unlink("/path/to/", "y.json");
+        actor.unlink("/path/", "to/");
+        actor.unlink("/", "path/");
+
+        assert_eq!(
+            store.borrow().read("/"),
+            Some((1, Db::dir_from(&["path/"])))
+        );
+        assert_eq!(
+            store.borrow().read("/path/"),
+            Some((1, Db::dir_from(&["to/", "x.json"])))
+        );
+        assert_eq!(
+            store.borrow().read("/path/to/"),
+            Some((1, Db::dir_from(&["y.json"])))
+        );
     }
 }

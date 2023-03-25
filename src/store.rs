@@ -32,6 +32,10 @@ where
         self.set_key(key, rev, Some(value))
     }
 
+    pub fn remove(&mut self, key: &str, rev: Option<Rev>) -> Option<Rev> {
+        self.set_key(key, rev, None)
+    }
+
     fn set_key(&mut self, key: &str, rev: Option<Rev>, value: Option<T>) -> Option<Rev> {
         let client_rev = rev.unwrap_or(0);
         let entry = self.data.entry(key.into()).or_insert((0, None));
@@ -86,6 +90,19 @@ where
 
         if let Some(new_rev) = store.write(key, old_rev, value.clone()) {
             self.data.insert(key.into(), Some((new_rev, value)));
+            true
+        } else {
+            self.data.remove(key);
+            false
+        }
+    }
+
+    pub fn remove(&mut self, key: &str) -> bool {
+        let old_rev = self.get_rev(key);
+        let mut store = self.store.borrow_mut();
+
+        if let Some(_) = store.remove(key, old_rev) {
+            self.data.insert(key.into(), None);
             true
         } else {
             self.data.remove(key);
@@ -149,6 +166,26 @@ mod tests {
         assert_eq!(store.write("x", Some(rev), 'b'), Some(2));
         assert_eq!(store.seq, 2);
         assert_eq!(store.read("x"), Some((2, 'b')));
+    }
+
+    #[test]
+    fn removes_a_value() {
+        let mut store = Store::new();
+        let rev = store.write("x", None, 'a').unwrap();
+
+        assert_eq!(store.remove("x", Some(rev)), Some(2));
+        assert_eq!(store.read("x"), None);
+    }
+
+    #[test]
+    fn updates_a_different_key() {
+        let mut store = Store::new();
+        store.write("x", None, 'a').unwrap();
+
+        assert_eq!(store.write("y", None, 'z'), Some(1));
+        assert_eq!(store.seq, 2);
+        assert_eq!(store.read("x"), Some((1, 'a')));
+        assert_eq!(store.read("y"), Some((1, 'z')));
     }
 
     #[test]
@@ -238,6 +275,18 @@ mod tests {
     }
 
     #[test]
+    fn removes_a_value_from_the_store() {
+        let store = RefCell::new(Store::new());
+        let mut cache = Cache::new(&store);
+
+        assert_eq!(cache.write("x", 'a'), true);
+        assert_eq!(cache.remove("x"), true);
+
+        assert_eq!(store.borrow().read("x"), None);
+        assert_eq!(cache.read("x"), None);
+    }
+
+    #[test]
     fn fails_to_update_a_doc_it_did_not_read_first() {
         let store = RefCell::new(Store::new());
         let mut cache = Cache::new(&store);
@@ -258,6 +307,19 @@ mod tests {
 
         assert_eq!(store.borrow_mut().write("x", Some(1), 'c'), Some(2));
         assert_eq!(cache.write("x", 'b'), false);
+
+        assert_eq!(store.borrow().read("x"), Some((2, 'c')));
+    }
+
+    #[test]
+    fn fails_to_delete_with_a_stale_read() {
+        let store = RefCell::new(Store::new());
+        let mut cache = Cache::new(&store);
+
+        assert_eq!(cache.write("x", 'a'), true);
+
+        assert_eq!(store.borrow_mut().write("x", Some(1), 'c'), Some(2));
+        assert_eq!(cache.remove("x"), false);
 
         assert_eq!(store.borrow().read("x"), Some((2, 'c')));
     }

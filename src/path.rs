@@ -71,11 +71,11 @@ impl Path {
         &self.original
     }
 
-    pub fn dirs(&self) -> impl Iterator<Item = &str> {
+    pub fn dirs(&self) -> impl DoubleEndedIterator<Item = &str> {
         self.parts.iter().map(|(dir, _)| dir.as_ref())
     }
 
-    pub fn links(&self) -> impl Iterator<Item = (&str, &str)> {
+    pub fn links(&self) -> impl DoubleEndedIterator<Item = (&str, &str)> {
         self.parts
             .iter()
             .map(|(dir, name)| (dir.as_ref(), name.as_ref()))
