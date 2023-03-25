@@ -67,9 +67,9 @@ struct Planner<T> {
 }
 
 impl<T> Planner<T> {
-    fn new(graph: Graph<Act<T>>) -> Planner<T> {
+    fn new() -> Planner<T> {
         Planner {
-            graph,
+            graph: Graph::new(),
             clients: BTreeSet::new(),
         }
     }
@@ -152,8 +152,7 @@ mod tests {
 
     #[test]
     fn returns_the_ids_of_registered_clients() {
-        let graph = Graph::new();
-        let mut planner: Planner<Vec<char>> = Planner::new(graph);
+        let mut planner: Planner<Vec<char>> = Planner::new();
 
         planner.client("alice").update("/x", |_| Some(vec!['x']));
         planner.client("bob").remove("/y");
@@ -164,8 +163,7 @@ mod tests {
 
     #[test]
     fn plans_a_top_level_document_update() {
-        let graph = Graph::new();
-        let mut planner: Planner<Vec<char>> = Planner::new(graph);
+        let mut planner: Planner<Vec<char>> = Planner::new();
 
         planner.client("A").update("/x.json", |doc| doc);
 
@@ -190,8 +188,7 @@ mod tests {
 
     #[test]
     fn plans_an_update_in_a_top_level_directory() {
-        let graph = Graph::new();
-        let mut planner: Planner<Vec<char>> = Planner::new(graph);
+        let mut planner: Planner<Vec<char>> = Planner::new();
 
         planner.client("A").update("/path/x.json", |doc| doc);
 
@@ -222,8 +219,7 @@ mod tests {
 
     #[test]
     fn plans_an_update_in_a_nested_directory() {
-        let graph = Graph::new();
-        let mut planner: Planner<Vec<char>> = Planner::new(graph);
+        let mut planner: Planner<Vec<char>> = Planner::new();
 
         planner.client("A").update("/path/to/x.json", |doc| doc);
 
@@ -260,8 +256,7 @@ mod tests {
 
     #[test]
     fn plans_a_top_level_document_deletion() {
-        let graph = Graph::new();
-        let mut planner: Planner<Vec<char>> = Planner::new(graph);
+        let mut planner: Planner<Vec<char>> = Planner::new();
 
         planner.client("A").remove("/y.json");
 
@@ -282,8 +277,7 @@ mod tests {
 
     #[test]
     fn plans_a_deletion_in_a_nested_directory() {
-        let graph = Graph::new();
-        let mut planner: Planner<Vec<char>> = Planner::new(graph);
+        let mut planner: Planner<Vec<char>> = Planner::new();
 
         planner.client("A").remove("/path/to/y.json");
 
