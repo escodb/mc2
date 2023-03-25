@@ -15,6 +15,12 @@ impl fmt::Debug for Path {
     }
 }
 
+impl fmt::Display for Path {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", &self.original)
+    }
+}
+
 impl From<&str> for Path {
     fn from(value: &str) -> Path {
         Path::new(value)

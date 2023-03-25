@@ -1,9 +1,11 @@
-type Id = usize;
+pub type Id = usize;
 
+#[derive(Debug)]
 pub struct Graph<T> {
     nodes: Vec<Node<T>>,
 }
 
+#[derive(Debug)]
 struct Node<T> {
     id: Id,
     deps: Vec<Id>,
@@ -72,9 +74,52 @@ fn permute(nodes: Vec<(Id, Vec<Id>)>) -> Box<dyn Iterator<Item = Vec<Id>>> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
+    use std::fmt::Debug;
+
+    type NodeSpec<'a, T> = (&'a str, T, &'a [&'a str]);
+
+    pub fn check_graph<T>(graph: &Graph<T>, nodes: &[NodeSpec<T>])
+    where
+        T: Debug + PartialEq,
+    {
+        let mut mapping: HashMap<String, Id> = HashMap::new();
+
+        assert_eq!(
+            graph.nodes.len(),
+            nodes.len(),
+            "graph expected to have {} nodes but has {}",
+            nodes.len(),
+            graph.nodes.len()
+        );
+
+        for (key, value, deps) in nodes {
+            let opt_node = graph.nodes.iter().find(|node| &node.value == value);
+            assert!(opt_node.is_some(), "no node matching {:?}", value);
+
+            let node = opt_node.unwrap();
+            mapping.insert(key.to_string(), node.id);
+
+            let dep_ids: HashSet<_> = deps
+                .iter()
+                .map(|name| mapping.get(*name).unwrap())
+                .collect();
+
+            let actual_ids: HashSet<_> = node.deps.iter().collect();
+
+            assert_eq!(actual_ids.len(), node.deps.len());
+
+            assert_eq!(
+                actual_ids, dep_ids,
+                "dependencies for {:?} do not match node {:?}",
+                value, node
+            );
+        }
+
+        assert_eq!(mapping.len(), nodes.len());
+    }
 
     #[test]
     fn orders_a_single_action() {

@@ -5,4 +5,5 @@ fn main() {
 mod actor;
 mod graph;
 mod path;
+mod planner;
 mod store;
