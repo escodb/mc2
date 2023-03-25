@@ -50,8 +50,8 @@ where
         Some(entry.0)
     }
 
-    pub fn keys(&self) -> Vec<&str> {
-        self.data.keys().map(|key| key.as_ref()).collect()
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.data.keys().map(|key| key.as_ref())
     }
 }
 
@@ -207,7 +207,8 @@ mod tests {
         store.write("/path/", None, 'b');
         store.write("/z/doc.json", None, 'c');
 
-        assert_eq!(store.keys(), vec!["/", "/path/", "/z/doc.json"]);
+        let keys: Vec<_> = store.keys().collect();
+        assert_eq!(keys, ["/", "/path/", "/z/doc.json"]);
     }
 
     #[test]
