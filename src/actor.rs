@@ -3,22 +3,9 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
+use crate::db::Db;
 use crate::path::Path;
 use crate::store::{Cache, Store};
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Db<T> {
-    Doc(T),
-    Dir(BTreeSet<String>),
-}
-
-impl<T> Db<T> {
-    #[cfg(test)]
-    pub fn dir_from(entries: &[&str]) -> Db<T> {
-        let set = entries.iter().map(|s| s.to_string()).collect();
-        Db::Dir(set)
-    }
-}
 
 pub struct Actor<'a, T> {
     cache: Cache<'a, Db<T>>,

@@ -72,7 +72,7 @@ impl Path {
     }
 
     pub fn is_doc(&self) -> bool {
-        !self.original.ends_with(SEP)
+        !self.is_dir()
     }
 
     pub fn full(&self) -> &str {
