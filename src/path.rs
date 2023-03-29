@@ -5,7 +5,7 @@ use std::ops::Deref;
 
 const SEP: char = '/';
 
-#[derive(Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Path {
     original: String,
     parts: Vec<(String, String)>,
