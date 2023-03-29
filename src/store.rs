@@ -20,6 +20,14 @@ where
         }
     }
 
+    pub fn get(&self, key: &str) -> Option<&T> {
+        if let Some((_, Some(value))) = self.data.get(key) {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
     pub fn read(&self, key: &str) -> Option<(Rev, T)> {
         if let Some((rev, Some(value))) = self.data.get(key) {
             Some((*rev, value.clone()))

@@ -48,7 +48,7 @@ where
         let paths = self.store.keys().map(|k| Path::from(k));
 
         for doc in paths.filter(|p| p.is_doc()) {
-            if self.store.read(&doc).is_none() {
+            if self.store.get(&doc).is_none() {
                 continue;
             }
             self.check_doc(&doc);
@@ -57,7 +57,7 @@ where
 
     fn check_doc(&mut self, doc: &Path) {
         for (dir, name) in doc.links() {
-            if let Some((_, Db::Dir(entries))) = self.store.read(dir) {
+            if let Some(Db::Dir(entries)) = self.store.get(dir) {
                 if !entries.contains(name) {
                     self.errors.push(format!(
                         "dir '{}' does not include name '{}', required by doc '{}'",
