@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use actor::Actor;
+use db::check_consistency;
 use planner::{Act, Op, Planner};
 use store::Store;
 
@@ -39,6 +40,11 @@ fn main() {
 
         for act in acts {
             dispatch(&mut actors, act);
+
+            if let Err(errors) = check_consistency(&st.borrow()) {
+                println!("failure: {:?}", errors);
+                print_store(&st.borrow());
+            }
         }
 
         count += 1;
