@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::path::Path;
-use crate::store::Store;
+use crate::store::{Cache, Store};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Db<T> {
@@ -17,8 +17,9 @@ impl<T> Db<T> {
     }
 }
 
-pub type DbEntry<T> = (Path, Db<T>);
-pub type DbStore<T> = Store<DbEntry<T>>;
+type DbEntry<T> = (Path, Db<T>);
+pub type DbCache<'a, T> = Cache<'a, Path, DbEntry<T>>;
+pub type DbStore<T> = Store<Path, DbEntry<T>>;
 
 pub fn check_consistency<T>(store: &DbStore<T>) -> Result<(), Vec<String>>
 where
@@ -81,7 +82,7 @@ mod tests {
     use super::*;
 
     fn make_store() -> DbStore<char> {
-        let mut store = Store::new();
+        let mut store = DbStore::new();
 
         store.write("/", None, (Path::from("/"), Db::dir_from(&["path/"])));
         store.write(

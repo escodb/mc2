@@ -3,12 +3,11 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
-use crate::db::{Db, DbEntry, DbStore};
+use crate::db::{Db, DbCache, DbStore};
 use crate::path::Path;
-use crate::store::Cache;
 
 pub struct Actor<'a, T> {
-    cache: Cache<'a, DbEntry<T>>,
+    cache: DbCache<'a, T>,
     crashed: bool,
     unlinks: BTreeSet<String>,
 }
@@ -19,7 +18,7 @@ where
 {
     pub fn new(store: &RefCell<DbStore<T>>) -> Actor<T> {
         Actor {
-            cache: Cache::new(store),
+            cache: DbCache::new(store),
             crashed: false,
             unlinks: BTreeSet::new(),
         }
@@ -106,13 +105,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::Store;
 
     const X_PATH: &str = "/path/x.json";
     const Y_PATH: &str = "/path/to/y.json";
 
     fn make_store() -> RefCell<DbStore<Vec<char>>> {
-        let mut store = Store::new();
+        let mut store = DbStore::new();
 
         store.write("/", None, (Path::from("/"), Db::dir_from(&["path/"])));
         store.write(

@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 
+use std::borrow::Borrow;
 use std::fmt;
 use std::ops::Deref;
 
 const SEP: char = '/';
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Path {
     original: String,
     parts: Vec<(String, String)>,
@@ -23,17 +24,23 @@ impl fmt::Display for Path {
     }
 }
 
-impl From<&str> for Path {
-    fn from(value: &str) -> Path {
-        Path::new(value)
+impl Borrow<str> for Path {
+    fn borrow(&self) -> &str {
+        &self.original
     }
 }
 
 impl Deref for Path {
     type Target = str;
 
-    fn deref(&self) -> &Self::Target {
+    fn deref(&self) -> &str {
         &self.original
+    }
+}
+
+impl From<&str> for Path {
+    fn from(value: &str) -> Path {
+        Path::new(value)
     }
 }
 

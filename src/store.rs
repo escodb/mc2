@@ -1,26 +1,32 @@
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 type Rev = usize;
 
 #[derive(Clone)]
-pub struct Store<T> {
-    data: BTreeMap<String, (Rev, Option<T>)>,
+pub struct Store<K, V> {
+    data: BTreeMap<K, (Rev, Option<V>)>,
     pub seq: Rev,
 }
 
-impl<T> Store<T>
+impl<K, V> Store<K, V>
 where
-    T: Clone,
+    K: Ord,
+    V: Clone,
 {
-    pub fn new() -> Store<T> {
+    pub fn new() -> Store<K, V> {
         Store {
             data: BTreeMap::new(),
             seq: 0,
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<&T> {
+    pub fn get<Q>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         if let Some((_, Some(value))) = self.data.get(key) {
             Some(value)
         } else {
@@ -28,7 +34,11 @@ where
         }
     }
 
-    pub fn read(&self, key: &str) -> Option<(Rev, T)> {
+    pub fn read<Q>(&self, key: &Q) -> Option<(Rev, V)>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         if let Some((rev, Some(value))) = self.data.get(key) {
             Some((*rev, value.clone()))
         } else {
@@ -36,15 +46,30 @@ where
         }
     }
 
-    pub fn write(&mut self, key: &str, rev: Option<Rev>, value: T) -> Option<Rev> {
+    pub fn write<'a, Q>(&mut self, key: &'a Q, rev: Option<Rev>, value: V) -> Option<Rev>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+        &'a Q: Into<K>,
+    {
         self.set_key(key, rev, Some(value))
     }
 
-    pub fn remove(&mut self, key: &str, rev: Option<Rev>) -> Option<Rev> {
+    pub fn remove<'a, Q>(&mut self, key: &'a Q, rev: Option<Rev>) -> Option<Rev>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+        &'a Q: Into<K>,
+    {
         self.set_key(key, rev, None)
     }
 
-    fn set_key(&mut self, key: &str, rev: Option<Rev>, value: Option<T>) -> Option<Rev> {
+    fn set_key<'a, Q>(&mut self, key: &'a Q, rev: Option<Rev>, value: Option<V>) -> Option<Rev>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+        &'a Q: Into<K>,
+    {
         let client_rev = rev.unwrap_or(0);
         let entry = self.data.entry(key.into()).or_insert((0, None));
 
@@ -58,28 +83,34 @@ where
         Some(entry.0)
     }
 
-    pub fn keys(&self) -> impl Iterator<Item = &str> {
-        self.data.keys().map(|key| key.as_ref())
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
+        self.data.keys()
     }
 }
 
-pub struct Cache<'a, T> {
-    store: &'a RefCell<Store<T>>,
-    data: BTreeMap<String, Option<(Rev, T)>>,
+pub struct Cache<'a, K, V> {
+    store: &'a RefCell<Store<K, V>>,
+    data: BTreeMap<K, Option<(Rev, V)>>,
 }
 
-impl<T> Cache<'_, T>
+impl<K, V> Cache<'_, K, V>
 where
-    T: Clone,
+    K: Ord,
+    V: Clone,
 {
-    pub fn new(store: &RefCell<Store<T>>) -> Cache<T> {
+    pub fn new(store: &RefCell<Store<K, V>>) -> Cache<K, V> {
         Cache {
             store,
             data: BTreeMap::new(),
         }
     }
 
-    pub fn read(&mut self, key: &str) -> Option<T> {
+    pub fn read<'a, Q>(&mut self, key: &'a Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+        &'a Q: Into<K>,
+    {
         if !self.data.contains_key(key) {
             let record = self.store.borrow().read(key);
             self.data.insert(key.into(), record);
@@ -92,7 +123,12 @@ where
         }
     }
 
-    pub fn write(&mut self, key: &str, value: T) -> bool {
+    pub fn write<'a, Q>(&mut self, key: &'a Q, value: V) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+        &'a Q: Into<K>,
+    {
         let old_rev = self.get_rev(key);
         let mut store = self.store.borrow_mut();
 
@@ -105,7 +141,12 @@ where
         }
     }
 
-    pub fn remove(&mut self, key: &str) -> bool {
+    pub fn remove<'a, Q>(&mut self, key: &'a Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+        &'a Q: Into<K>,
+    {
         let old_rev = self.get_rev(key);
         let mut store = self.store.borrow_mut();
 
@@ -118,7 +159,11 @@ where
         }
     }
 
-    fn get_rev(&self, key: &str) -> Option<Rev> {
+    fn get_rev<Q>(&self, key: &Q) -> Option<Rev>
+    where
+        K: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         if let Some(Some((rev, _))) = self.data.get(key) {
             Some(*rev)
         } else {
@@ -133,14 +178,14 @@ mod tests {
 
     #[test]
     fn returns_none_for_unknown_key() {
-        let store: Store<()> = Store::new();
+        let store: Store<String, ()> = Store::new();
         assert_eq!(store.seq, 0);
         assert_eq!(store.read("x"), None);
     }
 
     #[test]
     fn stores_a_new_value() {
-        let mut store = Store::new();
+        let mut store: Store<String, _> = Store::new();
         assert_eq!(store.write("x", None, 'a'), Some(1));
         assert_eq!(store.seq, 1);
         assert_eq!(store.read("x"), Some((1, 'a')));
@@ -148,7 +193,7 @@ mod tests {
 
     #[test]
     fn does_not_update_a_value_without_a_rev() {
-        let mut store = Store::new();
+        let mut store: Store<String, _> = Store::new();
         store.write("x", None, 'a');
 
         assert_eq!(store.write("x", None, 'b'), None);
@@ -158,7 +203,7 @@ mod tests {
 
     #[test]
     fn does_not_update_a_value_with_a_bad_rev() {
-        let mut store = Store::new();
+        let mut store: Store<String, _> = Store::new();
         let rev = store.write("x", None, 'a').unwrap();
 
         assert_eq!(store.write("x", Some(rev + 1), 'b'), None);
@@ -168,7 +213,7 @@ mod tests {
 
     #[test]
     fn updates_a_value_with_a_matching_rev() {
-        let mut store = Store::new();
+        let mut store: Store<String, _> = Store::new();
         let rev = store.write("x", None, 'a').unwrap();
 
         assert_eq!(store.write("x", Some(rev), 'b'), Some(2));
@@ -178,7 +223,7 @@ mod tests {
 
     #[test]
     fn removes_a_value() {
-        let mut store = Store::new();
+        let mut store: Store<String, _> = Store::new();
         let rev = store.write("x", None, 'a').unwrap();
 
         assert_eq!(store.remove("x", Some(rev)), Some(2));
@@ -187,7 +232,7 @@ mod tests {
 
     #[test]
     fn updates_a_different_key() {
-        let mut store = Store::new();
+        let mut store: Store<String, _> = Store::new();
         store.write("x", None, 'a').unwrap();
 
         assert_eq!(store.write("y", None, 'z'), Some(1));
@@ -198,7 +243,7 @@ mod tests {
 
     #[test]
     fn returns_a_copy_of_the_stored_value() {
-        let mut store = Store::new();
+        let mut store: Store<String, _> = Store::new();
         store.write("x", None, vec![4, 5, 6]);
 
         let (_, mut a) = store.read("x").unwrap();
@@ -209,7 +254,7 @@ mod tests {
 
     #[test]
     fn returns_all_the_keys_in_the_store() {
-        let mut store = Store::new();
+        let mut store: Store<String, _> = Store::new();
 
         store.write("/", None, 'a');
         store.write("/path/", None, 'b');
@@ -221,7 +266,7 @@ mod tests {
 
     #[test]
     fn returns_none_for_an_unknown_key() {
-        let store: RefCell<Store<()>> = RefCell::new(Store::new());
+        let store: RefCell<Store<String, ()>> = RefCell::new(Store::new());
         let mut cache = Cache::new(&store);
 
         assert_eq!(cache.read("x"), None);
@@ -230,7 +275,7 @@ mod tests {
     #[test]
     fn reads_a_value_from_the_store() {
         let store = RefCell::new(Store::new());
-        let mut cache = Cache::new(&store);
+        let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(store.borrow_mut().write("x", None, 'a'), Some(1));
         assert_eq!(cache.read("x"), Some('a'));
@@ -239,7 +284,7 @@ mod tests {
     #[test]
     fn returns_a_copy_of_the_cached_value() {
         let store = RefCell::new(Store::new());
-        let mut cache = Cache::new(&store);
+        let mut cache: Cache<String, _> = Cache::new(&store);
 
         cache.write("x", vec![4, 5, 6]);
 
@@ -252,7 +297,7 @@ mod tests {
     #[test]
     fn caches_a_read_that_returns_none() {
         let store = RefCell::new(Store::new());
-        let mut cache = Cache::new(&store);
+        let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.read("x"), None);
         assert_eq!(store.borrow_mut().write("x", None, 'a'), Some(1));
@@ -262,7 +307,7 @@ mod tests {
     #[test]
     fn writes_a_value_to_the_store() {
         let store = RefCell::new(Store::new());
-        let mut cache = Cache::new(&store);
+        let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write("x", 'a'), true);
 
@@ -273,7 +318,7 @@ mod tests {
     #[test]
     fn updates_a_value_in_the_store() {
         let store = RefCell::new(Store::new());
-        let mut cache = Cache::new(&store);
+        let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write("x", 'a'), true);
         assert_eq!(cache.write("x", 'b'), true);
@@ -286,7 +331,7 @@ mod tests {
     #[test]
     fn removes_a_value_from_the_store() {
         let store = RefCell::new(Store::new());
-        let mut cache = Cache::new(&store);
+        let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write("x", 'a'), true);
         assert_eq!(cache.remove("x"), true);
@@ -298,7 +343,7 @@ mod tests {
     #[test]
     fn fails_to_update_a_doc_it_did_not_read_first() {
         let store = RefCell::new(Store::new());
-        let mut cache = Cache::new(&store);
+        let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(store.borrow_mut().write("x", None, 'a'), Some(1));
         assert_eq!(cache.write("x", 'b'), false);
@@ -310,7 +355,7 @@ mod tests {
     #[test]
     fn fails_to_update_with_a_stale_read() {
         let store = RefCell::new(Store::new());
-        let mut cache = Cache::new(&store);
+        let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write("x", 'a'), true);
 
@@ -323,7 +368,7 @@ mod tests {
     #[test]
     fn fails_to_delete_with_a_stale_read() {
         let store = RefCell::new(Store::new());
-        let mut cache = Cache::new(&store);
+        let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write("x", 'a'), true);
 
@@ -336,7 +381,7 @@ mod tests {
     #[test]
     fn recovers_after_a_failed_write() {
         let store = RefCell::new(Store::new());
-        let mut cache = Cache::new(&store);
+        let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write("x", 'a'), true);
 
@@ -353,8 +398,8 @@ mod tests {
     #[test]
     fn allows_multiple_clients_to_mutate_the_store() {
         let store = RefCell::new(Store::new());
-        let mut a = Cache::new(&store);
-        let mut b = Cache::new(&store);
+        let mut a: Cache<String, _> = Cache::new(&store);
+        let mut b: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(a.write("x", 'a'), true);
         assert_eq!(b.write("y", 'b'), true);
