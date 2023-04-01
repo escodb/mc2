@@ -9,7 +9,7 @@ use crate::path::Path;
 pub struct Actor<'a, T> {
     cache: DbCache<'a, T>,
     crashed: bool,
-    unlinks: BTreeSet<String>,
+    unlinks: BTreeSet<Path>,
 }
 
 impl<T> Actor<'_, T>
@@ -28,7 +28,7 @@ where
         if self.crashed {
             return None;
         }
-        if let Some((_, Db::Doc(value))) = self.cache.read(path) {
+        if let Some(Db::Doc(value)) = self.cache.read(path) {
             Some(value)
         } else {
             None
@@ -71,7 +71,7 @@ where
         if self.crashed {
             return None;
         }
-        if let Some((_, Db::Dir(value))) = self.cache.read(path) {
+        if let Some(Db::Dir(value)) = self.cache.read(path) {
             Some(value)
         } else {
             None
@@ -95,8 +95,7 @@ where
     }
 
     fn write(&mut self, key: &str, value: Db<T>) {
-        let path = Path::from(key);
-        if !self.cache.write(key, (path, value)) {
+        if !self.cache.write(key, value) {
             self.crashed = true;
         }
     }
@@ -112,24 +111,12 @@ mod tests {
     fn make_store() -> RefCell<DbStore<Vec<char>>> {
         let mut store = DbStore::new();
 
-        store.write("/", None, (Path::from("/"), Db::dir_from(&["path/"])));
-        store.write(
-            "/path/",
-            None,
-            (Path::from("/path/"), Db::dir_from(&["to/", "x.json"])),
-        );
-        store.write(
-            "/path/to/",
-            None,
-            (Path::from("/path/to/"), Db::dir_from(&["y.json"])),
-        );
+        store.write("/", None, Db::dir_from(&["path/"]));
+        store.write("/path/", None, Db::dir_from(&["to/", "x.json"]));
+        store.write("/path/to/", None, Db::dir_from(&["y.json"]));
 
-        store.write(X_PATH, None, (Path::from(X_PATH), Db::Doc(vec!['a', 'b'])));
-        store.write(
-            Y_PATH,
-            None,
-            (Path::from(Y_PATH), Db::Doc(vec!['c', 'd', 'e'])),
-        );
+        store.write(X_PATH, None, Db::Doc(vec!['a', 'b']));
+        store.write(Y_PATH, None, Db::Doc(vec!['c', 'd', 'e']));
 
         RefCell::new(store)
     }
@@ -161,10 +148,7 @@ mod tests {
         actor.put(X_PATH, |doc| Some(doc?.iter().rev().cloned().collect()));
 
         let rec = store.borrow().read(X_PATH);
-        assert_eq!(
-            rec,
-            Some((2, (Path::from(X_PATH), Db::Doc(vec!['b', 'a']))))
-        );
+        assert_eq!(rec, Some((2, Db::Doc(vec!['b', 'a']))));
 
         let doc = actor.get(X_PATH);
         assert_eq!(doc, Some(vec!['b', 'a']));
@@ -186,10 +170,7 @@ mod tests {
         });
 
         let rec = store.borrow().read(X_PATH);
-        assert_eq!(
-            rec,
-            Some((3, (Path::from(X_PATH), Db::Doc(vec!['b', 'a', 'z']))))
-        );
+        assert_eq!(rec, Some((3, Db::Doc(vec!['b', 'a', 'z']))));
 
         let doc = actor.get(X_PATH);
         assert_eq!(doc, Some(vec!['b', 'a', 'z']));
@@ -204,12 +185,12 @@ mod tests {
 
         store
             .borrow_mut()
-            .write(X_PATH, Some(1), (Path::from(X_PATH), Db::Doc(vec!['z'])));
+            .write(X_PATH, Some(1), Db::Doc(vec!['z']));
 
         actor.put(X_PATH, |_| Some(vec!['p', 'q']));
 
         let rec = store.borrow().read(X_PATH);
-        assert_eq!(rec, Some((2, (Path::from(X_PATH), Db::Doc(vec!['z'])))));
+        assert_eq!(rec, Some((2, Db::Doc(vec!['z']))));
     }
 
     #[test]
@@ -221,7 +202,7 @@ mod tests {
 
         store
             .borrow_mut()
-            .write(X_PATH, Some(1), (Path::from(X_PATH), Db::Doc(vec!['z'])));
+            .write(X_PATH, Some(1), Db::Doc(vec!['z']));
 
         actor.put(X_PATH, |_| Some(vec!['p', 'q']));
 
@@ -229,7 +210,7 @@ mod tests {
         actor.put(X_PATH, |_| Some(vec!['x', 'y']));
 
         let rec = store.borrow().read(X_PATH);
-        assert_eq!(rec, Some((2, (Path::from(X_PATH), Db::Doc(vec!['z'])))));
+        assert_eq!(rec, Some((2, Db::Doc(vec!['z']))));
     }
 
     #[test]
@@ -243,13 +224,7 @@ mod tests {
         let rec = store.borrow().read("/path/");
         assert_eq!(
             rec,
-            Some((
-                3,
-                (
-                    Path::from("/path/"),
-                    Db::dir_from(&["a.txt", "to/", "x.json", "z.txt"])
-                )
-            ))
+            Some((3, Db::dir_from(&["a.txt", "to/", "x.json", "z.txt"])))
         );
     }
 
@@ -261,10 +236,7 @@ mod tests {
         actor.link("/path/", "x.json");
 
         let rec = store.borrow().read("/path/");
-        assert_eq!(
-            rec,
-            Some((2, (Path::from("/path/"), Db::dir_from(&["to/", "x.json"]))))
-        );
+        assert_eq!(rec, Some((2, Db::dir_from(&["to/", "x.json"]))));
     }
 
     #[test]
@@ -300,15 +272,15 @@ mod tests {
 
         assert_eq!(
             store.borrow().read("/"),
-            Some((1, (Path::from("/"), Db::dir_from(&["path/"]))))
+            Some((1, Db::dir_from(&["path/"])))
         );
         assert_eq!(
             store.borrow().read("/path/"),
-            Some((2, (Path::from("/path/"), Db::dir_from(&["x.json"]))))
+            Some((2, Db::dir_from(&["x.json"])))
         );
         assert_eq!(
             store.borrow().read("/path/to/"),
-            Some((2, (Path::from("/path/to/"), Db::dir_from(&[]))))
+            Some((2, Db::dir_from(&[])))
         );
         assert_eq!(store.borrow().read("/path/to/y.json"), None);
     }
@@ -324,11 +296,11 @@ mod tests {
 
         assert_eq!(
             store.borrow().read("/"),
-            Some((1, (Path::from("/"), Db::dir_from(&["path/"]))))
+            Some((1, Db::dir_from(&["path/"])))
         );
         assert_eq!(
             store.borrow().read("/path/"),
-            Some((2, (Path::from("/path/"), Db::dir_from(&["to/"]))))
+            Some((2, Db::dir_from(&["to/"])))
         );
         assert_eq!(store.borrow().read("/path/x.json"), None);
     }
@@ -344,15 +316,15 @@ mod tests {
 
         assert_eq!(
             store.borrow().read("/"),
-            Some((1, (Path::from("/"), Db::dir_from(&["path/"]))))
+            Some((1, Db::dir_from(&["path/"])))
         );
         assert_eq!(
             store.borrow().read("/path/"),
-            Some((1, (Path::from("/path/"), Db::dir_from(&["to/", "x.json"]))))
+            Some((1, Db::dir_from(&["to/", "x.json"])))
         );
         assert_eq!(
             store.borrow().read("/path/to/"),
-            Some((1, (Path::from("/path/to/"), Db::dir_from(&["y.json"]))))
+            Some((1, Db::dir_from(&["y.json"])))
         );
     }
 }

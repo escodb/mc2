@@ -17,9 +17,8 @@ impl<T> Db<T> {
     }
 }
 
-type DbEntry<T> = (Path, Db<T>);
-pub type DbCache<'a, T> = Cache<'a, Path, DbEntry<T>>;
-pub type DbStore<T> = Store<Path, DbEntry<T>>;
+pub type DbCache<'a, T> = Cache<'a, Path, Db<T>>;
+pub type DbStore<T> = Store<Path, Db<T>>;
 
 pub fn check_consistency<T>(store: &DbStore<T>) -> Result<(), Vec<String>>
 where
@@ -49,18 +48,16 @@ where
     T: Clone,
 {
     fn check(&mut self) {
-        for key in self.store.keys() {
-            if let Some((path, _)) = self.store.get(key) {
-                if path.is_doc() {
-                    self.check_doc(&path);
-                }
+        for path in self.store.keys() {
+            if path.is_doc() && self.store.get(path).is_some() {
+                self.check_doc(&path);
             }
         }
     }
 
     fn check_doc(&mut self, doc: &Path) {
         for (dir, name) in doc.links() {
-            if let Some((_, Db::Dir(entries))) = self.store.get(dir) {
+            if let Some(Db::Dir(entries)) = self.store.get(dir) {
                 if !entries.contains(name) {
                     self.errors.push(format!(
                         "dir '{}' does not include name '{}', required by doc '{}'",
@@ -84,22 +81,10 @@ mod tests {
     fn make_store() -> DbStore<char> {
         let mut store = DbStore::new();
 
-        store.write("/", None, (Path::from("/"), Db::dir_from(&["path/"])));
-        store.write(
-            "/path/",
-            None,
-            (Path::from("/path/"), Db::dir_from(&["to/"])),
-        );
-        store.write(
-            "/path/to/",
-            None,
-            (Path::from("/path/to/"), Db::dir_from(&["x.json"])),
-        );
-        store.write(
-            "/path/to/x.json",
-            None,
-            (Path::from("/path/to/x.json"), Db::Doc('a')),
-        );
+        store.write("/", None, Db::dir_from(&["path/"]));
+        store.write("/path/", None, Db::dir_from(&["to/"]));
+        store.write("/path/to/", None, Db::dir_from(&["x.json"]));
+        store.write("/path/to/x.json", None, Db::Doc('a'));
 
         store
     }
@@ -113,11 +98,7 @@ mod tests {
     #[test]
     fn complains_if_a_doc_is_not_linked() {
         let mut store = make_store();
-        store.write(
-            "/path/to/",
-            Some(1),
-            (Path::from("/path/to/"), Db::dir_from(&[])),
-        );
+        store.write("/path/to/", Some(1), Db::dir_from(&[]));
 
         assert_eq!(
             check_consistency(&store),
@@ -143,16 +124,8 @@ mod tests {
     #[test]
     fn complains_if_parent_dir_is_missing() {
         let mut store = make_store();
-        store.write(
-            "/",
-            Some(1),
-            (Path::from("/"), Db::dir_from(&["other/", "path/"])),
-        );
-        store.write(
-            "/other/y.json",
-            None,
-            (Path::from("/other/y.json"), Db::Doc('b')),
-        );
+        store.write("/", Some(1), Db::dir_from(&["other/", "path/"]));
+        store.write("/other/y.json", None, Db::Doc('b'));
 
         assert_eq!(
             check_consistency(&store),
@@ -165,7 +138,7 @@ mod tests {
     #[test]
     fn complains_if_a_parent_dir_is_not_linked() {
         let mut store = make_store();
-        store.write("/path/", Some(1), (Path::from("/path/"), Db::dir_from(&[])));
+        store.write("/path/", Some(1), Db::dir_from(&[]));
 
         assert_eq!(
             check_consistency(&store),
@@ -178,7 +151,7 @@ mod tests {
     #[test]
     fn complains_if_a_grandparent_dir_is_not_linked() {
         let mut store = make_store();
-        store.write("/", Some(1), (Path::from("/"), Db::dir_from(&[])));
+        store.write("/", Some(1), Db::dir_from(&[]));
 
         assert_eq!(
             check_consistency(&store),
@@ -191,7 +164,7 @@ mod tests {
     #[test]
     fn does_not_complain_if_an_ancestor_of_a_deleted_doc_is_unlinked() {
         let mut store = make_store();
-        store.write("/", Some(1), (Path::from("/"), Db::dir_from(&[])));
+        store.write("/", Some(1), Db::dir_from(&[]));
         store.remove("/path/to/x.json", Some(1));
 
         assert_eq!(check_consistency(&store), Ok(()));
