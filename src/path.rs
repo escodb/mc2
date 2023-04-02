@@ -2,7 +2,6 @@
 
 use std::borrow::Borrow;
 use std::fmt;
-use std::ops::Deref;
 
 const SEP: char = '/';
 
@@ -48,11 +47,9 @@ impl Ord for Path {
     }
 }
 
-impl Deref for Path {
-    type Target = str;
-
-    fn deref(&self) -> &str {
-        &self.original
+impl From<&Path> for Path {
+    fn from(value: &Path) -> Path {
+        value.clone()
     }
 }
 
@@ -118,12 +115,6 @@ impl Path {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn derefs_to_str() {
-        let path = Path::from("/foo");
-        assert_eq!(path.deref(), "/foo");
-    }
 
     #[test]
     fn is_valid_if_it_begins_with_a_slash() {
