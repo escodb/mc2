@@ -60,9 +60,9 @@ where
         self.unlinks = BTreeSet::new();
 
         for (dir, name) in path.links().rev() {
-            self.unlinks.insert(dir.into());
+            self.unlinks.insert(dir.to_string());
 
-            if self.list(dir) != Some(BTreeSet::from([name.into()])) {
+            if self.list(dir) != Some(BTreeSet::from([name.to_string()])) {
                 break;
             }
         }
@@ -87,7 +87,7 @@ where
     pub fn link(&mut self, path: &Path, entry: &str) {
         if !self.crashed {
             let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
-            entries.insert(entry.into());
+            entries.insert(entry.to_string());
             self.write(path, Db::Dir(entries));
         }
     }

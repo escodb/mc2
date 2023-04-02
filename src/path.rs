@@ -80,7 +80,7 @@ fn parse(path: &str) -> Vec<(String, String)> {
 impl Path {
     pub fn new(name: &str) -> Path {
         Path {
-            original: name.into(),
+            original: name.to_string(),
             parts: parse(name),
         }
     }
