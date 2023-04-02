@@ -10,7 +10,7 @@ use crate::path::Path;
 pub struct Actor<'a, T> {
     cache: DbCache<'a, T>,
     crashed: bool,
-    unlinks: BTreeSet<Path>,
+    unlinks: BTreeSet<String>,
 }
 
 impl<T> Actor<'_, T>
@@ -93,7 +93,7 @@ where
     }
 
     pub fn unlink(&mut self, path: &Path, entry: &str) {
-        if !self.crashed && self.unlinks.contains(path) {
+        if !self.crashed && self.unlinks.contains(path.full()) {
             let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
             entries.remove(entry);
             self.write(path, Db::Dir(entries));
