@@ -14,6 +14,49 @@ struct Node<T> {
     value: T,
 }
 
+#[derive(Clone)]
+struct PermuteState {
+    nodes: Vec<(Id, Vec<Id>)>,
+}
+
+impl PermuteState {
+    fn new<T>(nodes: &[Node<T>]) -> PermuteState {
+        PermuteState {
+            nodes: nodes
+                .iter()
+                .map(|node| (node.id, node.deps.clone()))
+                .collect(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    fn available(&self) -> Vec<Id> {
+        self.nodes
+            .iter()
+            .filter(|(_, deps)| deps.is_empty())
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    fn remove(&self, id: Id) -> PermuteState {
+        let mut clone = self.clone();
+
+        if let Some(idx) = clone.nodes.iter().position(|(n, _)| *n == id) {
+            clone.nodes.remove(idx);
+        }
+
+        for (_, deps) in clone.nodes.iter_mut() {
+            if let Some(idx) = deps.iter().position(|n| *n == id) {
+                deps.remove(idx);
+            }
+        }
+        clone
+    }
+}
+
 type IdIter = Box<dyn Iterator<Item = Id>>;
 
 impl<T> Graph<T> {
@@ -34,37 +77,21 @@ impl<T> Graph<T> {
     }
 
     pub fn orderings(&self) -> impl Iterator<Item = impl Iterator<Item = &T>> {
-        let nodes: Vec<_> = self
-            .nodes
-            .iter()
-            .map(|node| (node.id, node.deps.clone()))
-            .collect();
-
-        permute(nodes).map(|order| order.map(|id| &self.nodes[id - 1].value))
+        let state = PermuteState::new(&self.nodes);
+        permute(state).map(|order| order.map(|id| &self.nodes[id - 1].value))
     }
 }
 
-fn permute(nodes: Vec<(Id, Vec<Id>)>) -> Box<dyn Iterator<Item = IdIter>> {
-    if nodes.is_empty() {
+fn permute(state: PermuteState) -> Box<dyn Iterator<Item = IdIter>> {
+    if state.is_empty() {
         let inner = Box::new(iter::empty()) as IdIter;
         return Box::new(iter::once(inner));
     }
 
-    let available: Vec<_> = nodes
-        .iter()
-        .filter(|(_, deps)| deps.is_empty())
-        .map(|(node_id, _)| *node_id)
-        .collect();
+    let available = state.available();
 
     let states = available.into_iter().flat_map(move |action| {
-        let remaining: Vec<_> = nodes
-            .iter()
-            .filter(|(node_id, _)| *node_id != action)
-            .map(|(node_id, deps)| {
-                let filtered = deps.iter().cloned().filter(|dep| *dep != action).collect();
-                (*node_id, filtered)
-            })
-            .collect();
+        let remaining = state.remove(action);
 
         permute(remaining).map(move |others| {
             let chain = iter::once(action).chain(others);
