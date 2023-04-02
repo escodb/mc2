@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 
 use crate::db::{Db, DbCache, DbStore};
 use crate::path::Path;
+use crate::planner::{Act, Op};
 
 pub struct Actor<'a, T> {
     cache: DbCache<'a, T>,
@@ -25,7 +26,30 @@ where
         }
     }
 
-    pub fn get(&mut self, path: &Path) -> Option<T> {
+    pub fn dispatch(&mut self, act: &Act<T>) {
+        match &act.op {
+            Op::Get => {
+                self.get(&act.path);
+            }
+            Op::Put(update) => {
+                self.put(&act.path, update);
+            }
+            Op::Rm => {
+                self.rm(&act.path);
+            }
+            Op::List => {
+                self.list(&act.path);
+            }
+            Op::Link(name) => {
+                self.link(&act.path, name);
+            }
+            Op::Unlink(name) => {
+                self.unlink(&act.path, name);
+            }
+        }
+    }
+
+    fn get(&mut self, path: &Path) -> Option<T> {
         if self.crashed {
             return None;
         }
@@ -36,7 +60,7 @@ where
         }
     }
 
-    pub fn put<F>(&mut self, path: &Path, update: F)
+    fn put<F>(&mut self, path: &Path, update: F)
     where
         F: Fn(Option<T>) -> Option<T>,
     {
@@ -47,7 +71,7 @@ where
         }
     }
 
-    pub fn rm(&mut self, path: &Path) {
+    fn rm(&mut self, path: &Path) {
         if self.crashed || self.get(path).is_none() {
             return;
         }
@@ -68,7 +92,7 @@ where
         }
     }
 
-    pub fn list<'a, P>(&mut self, path: &'a P) -> Option<BTreeSet<String>>
+    fn list<'a, P>(&mut self, path: &'a P) -> Option<BTreeSet<String>>
     where
         Path: Borrow<P>,
         P: Ord + ?Sized,
@@ -84,7 +108,7 @@ where
         }
     }
 
-    pub fn link(&mut self, path: &Path, entry: &str) {
+    fn link(&mut self, path: &Path, entry: &str) {
         if !self.crashed {
             let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
             entries.insert(entry.to_string());
@@ -92,7 +116,7 @@ where
         }
     }
 
-    pub fn unlink(&mut self, path: &Path, entry: &str) {
+    fn unlink(&mut self, path: &Path, entry: &str) {
         if !self.crashed && self.unlinks.contains(path.full()) {
             let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
             entries.remove(entry);
