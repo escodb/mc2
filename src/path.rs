@@ -6,7 +6,7 @@ use std::ops::Deref;
 
 const SEP: char = '/';
 
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Eq)]
 pub struct Path {
     original: String,
     parts: Vec<(String, String)>,
@@ -27,6 +27,24 @@ impl fmt::Display for Path {
 impl Borrow<str> for Path {
     fn borrow(&self) -> &str {
         &self.original
+    }
+}
+
+impl PartialEq for Path {
+    fn eq(&self, other: &Path) -> bool {
+        self.original.eq(&other.original)
+    }
+}
+
+impl PartialOrd for Path {
+    fn partial_cmp(&self, other: &Path) -> Option<std::cmp::Ordering> {
+        self.original.partial_cmp(&other.original)
+    }
+}
+
+impl Ord for Path {
+    fn cmp(&self, other: &Path) -> std::cmp::Ordering {
+        self.original.cmp(&other.original)
     }
 }
 
