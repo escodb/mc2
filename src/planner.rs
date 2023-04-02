@@ -85,7 +85,7 @@ impl<T> Planner<T> {
         self.clients.iter().map(|s| s.as_ref())
     }
 
-    pub fn orderings(&self) -> impl Iterator<Item = Vec<&Act<T>>> {
+    pub fn orderings(&self) -> impl Iterator<Item = impl Iterator<Item = &Act<T>>> {
         self.graph.orderings()
     }
 }

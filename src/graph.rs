@@ -1,3 +1,5 @@
+use std::iter;
+
 pub type Id = usize;
 
 #[derive(Debug)]
@@ -11,6 +13,8 @@ struct Node<T> {
     deps: Vec<Id>,
     value: T,
 }
+
+type IdIter = Box<dyn Iterator<Item = Id>>;
 
 impl<T> Graph<T> {
     pub fn new() -> Graph<T> {
@@ -29,23 +33,21 @@ impl<T> Graph<T> {
         node_id
     }
 
-    pub fn orderings(&self) -> impl Iterator<Item = Vec<&T>> {
+    pub fn orderings(&self) -> impl Iterator<Item = impl Iterator<Item = &T>> {
         let nodes: Vec<_> = self
             .nodes
             .iter()
             .map(|node| (node.id, node.deps.clone()))
             .collect();
 
-        permute(nodes).map(|order| {
-            let values = order.iter().rev().map(|id| &self.nodes[id - 1].value);
-            values.collect()
-        })
+        permute(nodes).map(|order| order.map(|id| &self.nodes[id - 1].value))
     }
 }
 
-fn permute(nodes: Vec<(Id, Vec<Id>)>) -> Box<dyn Iterator<Item = Vec<Id>>> {
+fn permute(nodes: Vec<(Id, Vec<Id>)>) -> Box<dyn Iterator<Item = IdIter>> {
     if nodes.is_empty() {
-        return Box::new([Vec::new()].into_iter());
+        let inner = Box::new(iter::empty()) as IdIter;
+        return Box::new(iter::once(inner));
     }
 
     let available: Vec<_> = nodes
@@ -64,9 +66,9 @@ fn permute(nodes: Vec<(Id, Vec<Id>)>) -> Box<dyn Iterator<Item = Vec<Id>>> {
             })
             .collect();
 
-        permute(remaining).map(move |mut others| {
-            others.push(action);
-            others
+        permute(remaining).map(move |others| {
+            let chain = iter::once(action).chain(others);
+            Box::new(chain) as IdIter
         })
     });
 
@@ -121,11 +123,15 @@ pub mod tests {
         assert_eq!(mapping.len(), nodes.len());
     }
 
+    fn collect_orderings<T>(graph: &Graph<T>) -> Vec<Vec<&T>> {
+        graph.orderings().map(|o| o.collect()).collect()
+    }
+
     #[test]
     fn orders_a_single_action() {
         let mut graph = Graph::new();
         graph.add(&[], 'a');
-        let orderings: Vec<_> = graph.orderings().collect();
+        let orderings = collect_orderings(&graph);
 
         assert_eq!(orderings, [vec![&'a']]);
     }
@@ -135,7 +141,7 @@ pub mod tests {
         let mut graph = Graph::new();
         graph.add(&[], 'a');
         graph.add(&[], 'b');
-        let orderings: Vec<_> = graph.orderings().collect();
+        let orderings = collect_orderings(&graph);
 
         assert_eq!(orderings, [vec![&'a', &'b'], vec![&'b', &'a']]);
     }
@@ -145,7 +151,7 @@ pub mod tests {
         let mut graph = Graph::new();
         let a = graph.add(&[], 'a');
         graph.add(&[a], 'b');
-        let orderings: Vec<_> = graph.orderings().collect();
+        let orderings = collect_orderings(&graph);
 
         assert_eq!(orderings, [vec![&'a', &'b']]);
     }
@@ -159,7 +165,7 @@ pub mod tests {
         let c = graph.add(&[a], 'c');
         graph.add(&[b, c], 'd');
 
-        let orderings: Vec<_> = graph.orderings().collect();
+        let orderings = collect_orderings(&graph);
 
         assert_eq!(
             orderings,
@@ -177,7 +183,7 @@ pub mod tests {
                 deps = vec![graph.add(&deps, act)];
             }
         }
-        let orderings: Vec<_> = graph.orderings().collect();
+        let orderings = collect_orderings(&graph);
 
         assert_eq!(
             orderings,
@@ -204,7 +210,7 @@ pub mod tests {
         let link = graph.add(&reads, "LINK / x");
         graph.add(&[link], "PUT /x {}");
 
-        let orderings: Vec<_> = graph.orderings().collect();
+        let orderings = collect_orderings(&graph);
 
         assert_eq!(
             orderings,
@@ -224,7 +230,7 @@ pub mod tests {
         let get = graph.add(&[], "GET /x");
         graph.add(&[get, link], "PUT /x {}");
 
-        let orderings: Vec<_> = graph.orderings().collect();
+        let orderings = collect_orderings(&graph);
 
         assert_eq!(
             orderings,
@@ -252,7 +258,7 @@ pub mod tests {
 
         graph.add(&links, "PUT /path/x {}");
 
-        let orderings: Vec<_> = graph.orderings().collect();
+        let orderings = collect_orderings(&graph);
 
         assert_eq!(
             orderings,
@@ -376,7 +382,7 @@ pub mod tests {
     fn returns_a_uniqe_set_of_orderings() {
         let graph = example_graph();
 
-        let orderings: Vec<_> = graph.orderings().collect();
+        let orderings = collect_orderings(&graph);
         assert_eq!(orderings.len(), 150);
 
         let unique: HashSet<_> = orderings.iter().collect();
@@ -407,9 +413,10 @@ pub mod tests {
         ];
 
         for order in graph.orderings() {
+            let seq: Vec<_> = order.collect();
             for (a, b) in pairs {
-                let pos_a = order.iter().position(|n| **n == a);
-                let pos_b = order.iter().position(|n| **n == b);
+                let pos_a = seq.iter().position(|n| **n == a);
+                let pos_b = seq.iter().position(|n| **n == b);
                 assert!(pos_a > pos_b, "node {} appears before node {}", a, b);
             }
         }
@@ -420,14 +427,16 @@ pub mod tests {
         let graph = example_graph();
 
         assert!(graph.orderings().any(|order| {
-            let pos_4 = order.iter().position(|n| **n == 4);
-            let pos_6 = order.iter().position(|n| **n == 6);
+            let seq: Vec<_> = order.collect();
+            let pos_4 = seq.iter().position(|n| **n == 4);
+            let pos_6 = seq.iter().position(|n| **n == 6);
             pos_4 < pos_6
         }));
 
         assert!(graph.orderings().any(|order| {
-            let pos_4 = order.iter().position(|n| **n == 4);
-            let pos_6 = order.iter().position(|n| **n == 6);
+            let seq: Vec<_> = order.collect();
+            let pos_4 = seq.iter().position(|n| **n == 4);
+            let pos_6 = seq.iter().position(|n| **n == 6);
             pos_4 > pos_6
         }));
     }
