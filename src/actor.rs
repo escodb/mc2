@@ -4,12 +4,14 @@ use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
+use crate::config::Config;
 use crate::db::{Db, DbCache, DbStore};
 use crate::path::Path;
 use crate::planner::{Act, Op};
 
 pub struct Actor<'a, T> {
     cache: DbCache<'a, T>,
+    config: Config,
     crashed: bool,
     unlinks: BTreeSet<String>,
 }
@@ -18,9 +20,10 @@ impl<T> Actor<'_, T>
 where
     T: Clone,
 {
-    pub fn new(store: &RefCell<DbStore<T>>) -> Actor<T> {
+    pub fn new(store: &RefCell<DbStore<T>>, config: Config) -> Actor<T> {
         Actor {
             cache: DbCache::new(store),
+            config,
             crashed: false,
             unlinks: BTreeSet::new(),
         }
@@ -111,8 +114,10 @@ where
     fn link(&mut self, path: &Path, entry: &str) {
         if !self.crashed {
             let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
-            entries.insert(entry.to_string());
-            self.write(path, Db::Dir(entries));
+            if !self.config.skip_links || !entries.contains(entry) {
+                entries.insert(entry.to_string());
+                self.write(path, Db::Dir(entries));
+            }
         }
     }
 
@@ -159,7 +164,7 @@ mod tests {
     #[test]
     fn gets_an_existing_document() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         let doc = actor.get(&x_path());
         assert_eq!(doc, Some(vec!['a', 'b']));
@@ -168,7 +173,7 @@ mod tests {
     #[test]
     fn returns_none_for_a_missing_document() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         let doc = actor.get(&"/y.json".into());
         assert_eq!(doc, None);
@@ -177,7 +182,7 @@ mod tests {
     #[test]
     fn updates_a_document() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         actor.get(&x_path());
         actor.put(&x_path(), |doc| Some(doc?.iter().rev().cloned().collect()));
@@ -192,7 +197,7 @@ mod tests {
     #[test]
     fn updates_a_document_multiple_times() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         actor.get(&x_path());
         actor.put(&x_path(), |doc| Some(doc?.iter().rev().cloned().collect()));
@@ -214,7 +219,7 @@ mod tests {
     #[test]
     fn fails_to_write_a_conflicting_update() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         actor.get(&x_path());
 
@@ -231,7 +236,7 @@ mod tests {
     #[test]
     fn does_not_perform_more_actions_after_a_failed_write() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         actor.get(&x_path());
 
@@ -251,7 +256,7 @@ mod tests {
     #[test]
     fn creates_links() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         actor.link(&"/path/".into(), "a.txt");
         actor.link(&"/path/".into(), "z.txt");
@@ -266,7 +271,7 @@ mod tests {
     #[test]
     fn creates_links_that_already_exist() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         actor.link(&"/path/".into(), "x.json");
 
@@ -276,18 +281,30 @@ mod tests {
 
     #[test]
     fn can_skip_creating_links_that_already_exist() {
-        // todo
+        let store = make_store();
+        let mut skipper = Actor::new(&store, Config::new().skip_links(true));
+
+        skipper.link(&"/path/".into(), "x.json");
+
+        let rec = store.borrow().read("/path/");
+        assert_eq!(rec, Some((1, Db::dir_from(&["to/", "x.json"]))));
     }
 
     #[test]
     fn does_not_skip_creating_links_that_do_not_exist() {
-        // todo
+        let store = make_store();
+        let mut skipper = Actor::new(&store, Config::new().skip_links(true));
+
+        skipper.link(&"/path/".into(), "a.json");
+
+        let rec = store.borrow().read("/path/");
+        assert_eq!(rec, Some((2, Db::dir_from(&["a.json", "to/", "x.json"]))));
     }
 
     #[test]
     fn removes_a_document() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         actor.rm(&x_path());
 
@@ -298,7 +315,7 @@ mod tests {
     #[test]
     fn allows_empty_parent_directories_to_be_removed() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         actor.rm(&"/path/to/y.json".into());
         actor.unlink(&"/path/to/".into(), "y.json");
@@ -323,7 +340,7 @@ mod tests {
     #[test]
     fn prevents_non_empty_parent_directories_being_removed() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         actor.rm(&"/path/x.json".into());
         actor.unlink(&"/path/".into(), "x.json");
@@ -343,7 +360,7 @@ mod tests {
     #[test]
     fn does_not_decide_to_remove_directories_by_default() {
         let store = make_store();
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         actor.unlink(&"/path/to/".into(), "y.json");
         actor.unlink(&"/path/".into(), "to/");

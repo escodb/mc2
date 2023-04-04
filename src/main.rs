@@ -1,4 +1,5 @@
 mod actor;
+mod config;
 mod db;
 mod graph;
 mod path;

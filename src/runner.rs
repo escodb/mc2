@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::actor::Actor;
+use crate::config::Config;
 use crate::db::{check_consistency, DbStore};
 use crate::planner::{Client, Planner};
 
@@ -28,7 +29,7 @@ where
 
             let mut actors: HashMap<_, _> = planner
                 .clients()
-                .map(|name| (name.to_string(), Actor::new(&state)))
+                .map(|name| (name.to_string(), Actor::new(&state, Config::new())))
                 .collect();
 
             for act in plan {
@@ -45,7 +46,7 @@ where
         (self.init)(planner.client("tmp"));
 
         let store = RefCell::new(DbStore::new());
-        let mut actor = Actor::new(&store);
+        let mut actor = Actor::new(&store, Config::new());
 
         for act in planner.orderings().next().unwrap() {
             actor.dispatch(act);
