@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::config::{Config, Update};
+use crate::config::{Config, Remove, Update};
 use crate::graph::{Graph, Id};
 use crate::path::Path;
 
@@ -180,6 +180,14 @@ impl<'a, T> Client<'a, T> {
     }
 
     pub fn remove(&mut self, key: &str) {
+        if self.config.remove == Remove::UnlinkParallel {
+            self.remove_unlink_parallel(key);
+        } else {
+            self.remove_unlink_reverse_sequential(key);
+        }
+    }
+
+    fn remove_unlink_reverse_sequential(&mut self, key: &str) {
         let path = Path::from(key);
         let reads = self.do_reads(&path);
 
@@ -188,6 +196,18 @@ impl<'a, T> Client<'a, T> {
         for (dir, name) in path.links().rev() {
             let unlink = self.act(dir, Op::Unlink(name.to_string()));
             op = self.graph.add(&[op], unlink);
+        }
+    }
+
+    fn remove_unlink_parallel(&mut self, key: &str) {
+        let path = Path::from(key);
+        let reads = self.do_reads(&path);
+
+        let rm = self.graph.add(&reads, self.act(&path, Op::Rm));
+
+        for (dir, name) in path.links() {
+            let unlink = self.act(dir, Op::Unlink(name.to_string()));
+            self.graph.add(&[rm], unlink);
         }
     }
 }
@@ -391,6 +411,44 @@ mod tests {
                     "unlink3",
                     Act::new("A", "/".into(), Op::Unlink("path/".into())),
                     &["unlink2"],
+                ),
+            ],
+        );
+    }
+
+    #[test]
+    fn plans_a_deletion_in_a_nested_directory_with_unlink_parallel() {
+        let mut planner: Planner<Vec<char>> =
+            Planner::new(Config::new().remove(Remove::UnlinkParallel));
+
+        planner.client("A").remove("/path/to/y.json");
+
+        check_graph(
+            &planner.graph,
+            &[
+                ("get", Act::new("A", "/path/to/y.json".into(), Op::Get), &[]),
+                ("list1", Act::new("A", "/".into(), Op::List), &[]),
+                ("list2", Act::new("A", "/path/".into(), Op::List), &[]),
+                ("list3", Act::new("A", "/path/to/".into(), Op::List), &[]),
+                (
+                    "rm",
+                    Act::new("A", "/path/to/y.json".into(), Op::Rm),
+                    &["get", "list1", "list2", "list3"],
+                ),
+                (
+                    "unlink1",
+                    Act::new("A", "/path/to/".into(), Op::Unlink("y.json".into())),
+                    &["rm"],
+                ),
+                (
+                    "unlink2",
+                    Act::new("A", "/path/".into(), Op::Unlink("to/".into())),
+                    &["rm"],
+                ),
+                (
+                    "unlink3",
+                    Act::new("A", "/".into(), Op::Unlink("path/".into())),
+                    &["rm"],
                 ),
             ],
         );
