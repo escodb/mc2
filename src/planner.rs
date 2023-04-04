@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use crate::config::{Config, Update};
 use crate::graph::{Graph, Id};
 use crate::path::Path;
 
@@ -65,20 +66,22 @@ impl<T> PartialEq for Op<T> {
 
 pub struct Planner<T> {
     graph: Graph<Act<T>>,
+    config: Config,
     clients: BTreeSet<String>,
 }
 
 impl<T> Planner<T> {
-    pub fn new() -> Planner<T> {
+    pub fn new(config: Config) -> Planner<T> {
         Planner {
             graph: Graph::new(),
+            config,
             clients: BTreeSet::new(),
         }
     }
 
     pub fn client(&mut self, id: &str) -> Client<T> {
         self.clients.insert(id.to_string());
-        Client::new(&mut self.graph, id)
+        Client::new(&mut self.graph, id, self.config.clone())
     }
 
     pub fn clients(&self) -> impl Iterator<Item = &str> {
@@ -93,13 +96,15 @@ impl<T> Planner<T> {
 pub struct Client<'a, T> {
     id: String,
     graph: &'a mut Graph<Act<T>>,
+    config: Config,
 }
 
 impl<'a, T> Client<'a, T> {
-    fn new(graph: &'a mut Graph<Act<T>>, id: &str) -> Client<'a, T> {
+    fn new(graph: &'a mut Graph<Act<T>>, id: &str, config: Config) -> Client<'a, T> {
         Client {
             id: id.to_string(),
             graph,
+            config,
         }
     }
 
@@ -126,6 +131,17 @@ impl<'a, T> Client<'a, T> {
     where
         F: Fn(Option<T>) -> Option<T> + 'static,
     {
+        if self.config.update == Update::GetBeforePut {
+            self.update_get_before_put(key, update);
+        } else {
+            self.update_reads_before_links(key, update);
+        }
+    }
+
+    fn update_reads_before_links<F>(&mut self, key: &str, update: F)
+    where
+        F: Fn(Option<T>) -> Option<T> + 'static,
+    {
         let path = Path::from(key);
         let reads = self.do_reads(&path);
 
@@ -136,6 +152,28 @@ impl<'a, T> Client<'a, T> {
                 self.graph.add(&reads, link)
             })
             .collect();
+
+        let put = self.act(&path, Op::Put(Box::new(update)));
+        self.graph.add(&links, put);
+    }
+
+    fn update_get_before_put<F>(&mut self, key: &str, update: F)
+    where
+        F: Fn(Option<T>) -> Option<T> + 'static,
+    {
+        let path = Path::from(key);
+
+        let mut links: Vec<_> = path
+            .links()
+            .map(|(dir, name)| {
+                let list = self.graph.add(&[], self.act(dir, Op::List));
+                let link = self.act(dir, Op::Link(name.to_string()));
+                self.graph.add(&[list], link)
+            })
+            .collect();
+
+        let get = self.graph.add(&[], self.act(&path, Op::Get));
+        links.insert(0, get);
 
         let put = self.act(&path, Op::Put(Box::new(update)));
         self.graph.add(&links, put);
@@ -157,11 +195,12 @@ impl<'a, T> Client<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Update;
     use crate::graph::tests::check_graph;
 
     #[test]
     fn returns_the_ids_of_registered_clients() {
-        let mut planner: Planner<Vec<char>> = Planner::new();
+        let mut planner: Planner<Vec<char>> = Planner::new(Config::new());
 
         planner.client("alice").update("/x", |_| Some(vec!['x']));
         planner.client("bob").remove("/y");
@@ -172,7 +211,7 @@ mod tests {
 
     #[test]
     fn plans_a_top_level_document_update() {
-        let mut planner: Planner<Vec<char>> = Planner::new();
+        let mut planner: Planner<Vec<char>> = Planner::new(Config::new());
 
         planner.client("A").update("/x.json", |doc| doc);
 
@@ -197,7 +236,7 @@ mod tests {
 
     #[test]
     fn plans_an_update_in_a_top_level_directory() {
-        let mut planner: Planner<Vec<char>> = Planner::new();
+        let mut planner: Planner<Vec<char>> = Planner::new(Config::new());
 
         planner.client("A").update("/path/x.json", |doc| doc);
 
@@ -228,7 +267,7 @@ mod tests {
 
     #[test]
     fn plans_an_update_in_a_nested_directory() {
-        let mut planner: Planner<Vec<char>> = Planner::new();
+        let mut planner: Planner<Vec<char>> = Planner::new(Config::new());
 
         planner.client("A").update("/path/to/x.json", |doc| doc);
 
@@ -264,8 +303,40 @@ mod tests {
     }
 
     #[test]
+    fn plans_an_update_in_a_top_level_directory_with_get_before_put() {
+        let mut planner: Planner<Vec<char>> =
+            Planner::new(Config::new().update(Update::GetBeforePut));
+
+        planner.client("A").update("/path/x.json", |doc| doc);
+
+        check_graph(
+            &planner.graph,
+            &[
+                ("get", Act::new("A", "/path/x.json".into(), Op::Get), &[]),
+                ("list1", Act::new("A", "/".into(), Op::List), &[]),
+                ("list2", Act::new("A", "/path/".into(), Op::List), &[]),
+                (
+                    "link1",
+                    Act::new("A", "/".into(), Op::Link("path/".into())),
+                    &["list1"],
+                ),
+                (
+                    "link2",
+                    Act::new("A", "/path/".into(), Op::Link("x.json".into())),
+                    &["list2"],
+                ),
+                (
+                    "put",
+                    Act::new("A", "/path/x.json".into(), Op::Put(Box::new(|d| d))),
+                    &["get", "link1", "link2"],
+                ),
+            ],
+        );
+    }
+
+    #[test]
     fn plans_a_top_level_document_deletion() {
-        let mut planner: Planner<Vec<char>> = Planner::new();
+        let mut planner: Planner<Vec<char>> = Planner::new(Config::new());
 
         planner.client("A").remove("/y.json");
 
@@ -290,7 +361,7 @@ mod tests {
 
     #[test]
     fn plans_a_deletion_in_a_nested_directory() {
-        let mut planner: Planner<Vec<char>> = Planner::new();
+        let mut planner: Planner<Vec<char>> = Planner::new(Config::new());
 
         planner.client("A").remove("/path/to/y.json");
 

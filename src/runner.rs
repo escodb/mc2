@@ -17,7 +17,7 @@ where
     T: Clone + std::fmt::Debug,
 {
     fn run(&self) {
-        let mut planner = Planner::new();
+        let mut planner = Planner::new(Config::new());
         (self.plan)(&mut planner);
 
         let store = self.create_store();
@@ -42,7 +42,7 @@ where
     }
 
     fn create_store(&self) -> DbStore<T> {
-        let mut planner = Planner::new();
+        let mut planner = Planner::new(Config::new());
         (self.init)(planner.client("tmp"));
 
         let store = RefCell::new(DbStore::new());
