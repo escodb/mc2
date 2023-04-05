@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::actor::Actor;
 use crate::config::Config;
-use crate::db::{check_consistency, DbStore};
+use crate::db::{Checker, DbStore};
 use crate::planner::{Client, Planner};
 
 struct Scenario<T> {
@@ -26,6 +26,7 @@ where
         for plan in planner.orderings() {
             count += 1;
             let state = RefCell::new(store.clone());
+            let mut checker = Checker::new(&state);
 
             let mut actors: HashMap<_, _> = planner
                 .clients()
@@ -34,7 +35,7 @@ where
 
             for act in plan {
                 actors.get_mut(&act.client_id).unwrap().dispatch(act);
-                check_consistency(&state.borrow()).unwrap();
+                checker.check().unwrap();
             }
         }
         println!("    checked executions: {}", count);

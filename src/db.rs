@@ -1,7 +1,8 @@
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 
 use crate::path::Path;
-use crate::store::{Cache, Store};
+use crate::store::{Cache, Rev, Store};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Db<T> {
@@ -20,26 +21,9 @@ impl<T> Db<T> {
 pub type DbCache<'a, T> = Cache<'a, Path, Db<T>>;
 pub type DbStore<T> = Store<Path, Db<T>>;
 
-pub fn check_consistency<T>(store: &DbStore<T>) -> Result<(), Vec<String>>
-where
-    T: Clone,
-{
-    let mut checker = Checker {
-        store,
-        errors: Vec::new(),
-    };
-
-    checker.check();
-
-    if checker.errors.is_empty() {
-        Ok(())
-    } else {
-        Err(checker.errors)
-    }
-}
-
-struct Checker<'a, T> {
-    store: &'a DbStore<T>,
+pub struct Checker<'a, T> {
+    store: &'a RefCell<DbStore<T>>,
+    seq: Rev,
     errors: Vec<String>,
 }
 
@@ -47,17 +31,39 @@ impl<T> Checker<'_, T>
 where
     T: Clone,
 {
-    fn check(&mut self) {
-        for path in self.store.keys() {
-            if path.is_doc() && self.store.get(path).is_some() {
+    pub fn new(store: &RefCell<DbStore<T>>) -> Checker<T> {
+        Checker {
+            store,
+            seq: 0,
+            errors: Vec::new(),
+        }
+    }
+
+    pub fn check(&mut self) -> Result<(), Vec<String>> {
+        let store = self.store.borrow();
+
+        if self.seq == store.seq {
+            return Ok(());
+        }
+        self.errors = Vec::new();
+
+        for path in store.keys() {
+            if path.is_doc() && store.get(path).is_some() {
                 self.check_doc(&path);
             }
+        }
+
+        if self.errors.is_empty() {
+            self.seq = store.seq;
+            Ok(())
+        } else {
+            Err(self.errors.clone())
         }
     }
 
     fn check_doc(&mut self, doc: &Path) {
         for (dir, name) in doc.links() {
-            if let Some(Db::Dir(entries)) = self.store.get(dir) {
+            if let Some(Db::Dir(entries)) = self.store.borrow().get(dir) {
                 if !entries.contains(name) {
                     self.errors.push(format!(
                         "dir '{}' does not include name '{}', required by doc '{}'",
@@ -92,7 +98,11 @@ mod tests {
     #[test]
     fn checks_a_valid_store() {
         let store = make_store();
-        assert_eq!(check_consistency(&store), Ok(()));
+
+        let store_cell = RefCell::new(store);
+        let mut checker = Checker::new(&store_cell);
+
+        assert_eq!(checker.check(), Ok(()));
     }
 
     #[test]
@@ -100,8 +110,11 @@ mod tests {
         let mut store = make_store();
         store.write("/path/to/".into(), Some(1), Db::dir_from(&[]));
 
+        let store_cell = RefCell::new(store);
+        let mut checker = Checker::new(&store_cell);
+
         assert_eq!(
-            check_consistency(&store),
+            checker.check(),
             Err(vec![String::from(
                 "dir '/path/to/' does not include name 'x.json', required by doc '/path/to/x.json'"
             )])
@@ -113,8 +126,11 @@ mod tests {
         let mut store = make_store();
         store.remove("/path/to/".into(), Some(1));
 
+        let store_cell = RefCell::new(store);
+        let mut checker = Checker::new(&store_cell);
+
         assert_eq!(
-            check_consistency(&store),
+            checker.check(),
             Err(vec![String::from(
                 "dir '/path/to/', required by doc '/path/to/x.json', is missing"
             )])
@@ -127,8 +143,11 @@ mod tests {
         store.write("/".into(), Some(1), Db::dir_from(&["other/", "path/"]));
         store.write("/other/y.json".into(), None, Db::Doc('b'));
 
+        let store_cell = RefCell::new(store);
+        let mut checker = Checker::new(&store_cell);
+
         assert_eq!(
-            check_consistency(&store),
+            checker.check(),
             Err(vec![String::from(
                 "dir '/other/', required by doc '/other/y.json', is missing"
             )])
@@ -140,8 +159,11 @@ mod tests {
         let mut store = make_store();
         store.write("/path/".into(), Some(1), Db::dir_from(&[]));
 
+        let store_cell = RefCell::new(store);
+        let mut checker = Checker::new(&store_cell);
+
         assert_eq!(
-            check_consistency(&store),
+            checker.check(),
             Err(vec![String::from(
                 "dir '/path/' does not include name 'to/', required by doc '/path/to/x.json'"
             )])
@@ -153,8 +175,11 @@ mod tests {
         let mut store = make_store();
         store.write("/".into(), Some(1), Db::dir_from(&[]));
 
+        let store_cell = RefCell::new(store);
+        let mut checker = Checker::new(&store_cell);
+
         assert_eq!(
-            check_consistency(&store),
+            checker.check(),
             Err(vec![String::from(
                 "dir '/' does not include name 'path/', required by doc '/path/to/x.json'"
             )])
@@ -167,6 +192,9 @@ mod tests {
         store.write("/".into(), Some(1), Db::dir_from(&[]));
         store.remove("/path/to/x.json".into(), Some(1));
 
-        assert_eq!(check_consistency(&store), Ok(()));
+        let store_cell = RefCell::new(store);
+        let mut checker = Checker::new(&store_cell);
+
+        assert_eq!(checker.check(), Ok(()));
     }
 }
