@@ -1,10 +1,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 use crate::actor::Actor;
 use crate::config::Config;
-use crate::db::{Checker, DbStore};
-use crate::planner::{Client, Planner};
+use crate::db::{Checker, Db, DbStore};
+use crate::planner::{Act, Client, Planner};
 
 const SPLIT: &str = "========================================================================";
 
@@ -61,22 +62,30 @@ where
 struct RunnerScenario<'a, T> {
     config: Config,
     scenario: &'a Scenario<T>,
+    planner: Planner<T>,
 }
 
 impl<T> RunnerScenario<'_, T>
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     fn new(config: Config, scenario: &Scenario<T>) -> RunnerScenario<T> {
-        RunnerScenario { config, scenario }
+        let mut planner = Planner::new(config.clone());
+        (scenario.plan)(&mut planner);
+
+        RunnerScenario {
+            config,
+            scenario,
+            planner,
+        }
     }
 
     fn run(&self) {
         println!("Scenario: {}", self.scenario.name);
 
-        let count = self.check_execution();
+        let result = self.check_execution();
+        result.print();
 
-        println!("    checked executions: {}", format_number(count));
         println!("");
     }
 
@@ -94,34 +103,101 @@ where
         store.into_inner()
     }
 
-    fn check_execution(&self) -> usize {
-        let mut planner = Planner::new(self.config.clone());
-        (self.scenario.plan)(&mut planner);
-
+    fn check_execution(&self) -> TestResult<T> {
         let store = self.create_store();
         let mut count: usize = 0;
 
-        for plan in planner.orderings() {
+        for plan in self.planner.orderings() {
             count += 1;
             let state = RefCell::new(store.clone());
             let mut checker = Checker::new(&state);
 
-            let mut actors: HashMap<_, _> = planner
+            let mut actors: HashMap<_, _> = self
+                .planner
                 .clients()
                 .map(|name| (name.to_string(), Actor::new(&state, self.config.clone())))
                 .collect();
 
-            for act in plan {
+            for (i, act) in plan.iter().enumerate() {
                 actors.get_mut(&act.client_id).unwrap().dispatch(act);
 
-                if let Err(_) = checker.check() {
-                    println!("    result: FAIL");
-                    return count;
+                if let Err(errors) = checker.check() {
+                    return TestResult::Fail {
+                        count,
+                        errors,
+                        plan,
+                        state: state.borrow().clone(),
+                        step: i,
+                    };
                 }
             }
         }
-        println!("    result: PASS");
-        count
+        TestResult::Pass { count }
+    }
+}
+
+enum TestResult<'a, T> {
+    Pass {
+        count: usize,
+    },
+    Fail {
+        count: usize,
+        errors: Vec<String>,
+        state: DbStore<T>,
+        plan: Vec<&'a Act<T>>,
+        step: usize,
+    },
+}
+
+impl<T> TestResult<'_, T>
+where
+    T: Clone + Debug,
+{
+    fn is_passed(&self) -> bool {
+        match self {
+            TestResult::Pass { .. } => true,
+            TestResult::Fail { .. } => false,
+        }
+    }
+
+    fn count(&self) -> usize {
+        match self {
+            TestResult::Pass { count } => *count,
+            TestResult::Fail { count, .. } => *count,
+        }
+    }
+
+    fn print(&self) {
+        let status = if self.is_passed() { "PASS" } else { "FAIL" };
+        println!("    result: {}", status);
+        println!("    checked executions: {}", format_number(self.count()));
+
+        if let TestResult::Fail {
+            errors,
+            state,
+            plan,
+            step,
+            ..
+        } = self
+        {
+            println!("    errors:");
+            for error in errors {
+                println!("        - {}", error);
+            }
+            println!("    state:");
+            for key in state.keys() {
+                let value = format_value(state.read(key));
+                println!("        '{}' => {}", key, value);
+            }
+            println!("    execution:");
+            for (i, act) in plan.iter().enumerate() {
+                if i == *step {
+                    println!("    ==> {:?}", act);
+                } else {
+                    println!("        {:?}", act);
+                }
+            }
+        }
     }
 }
 
@@ -134,4 +210,15 @@ fn format_number(n: usize) -> String {
         .collect::<Result<Vec<&str>, _>>()
         .unwrap()
         .join(",")
+}
+
+fn format_value<T>(value: Option<(usize, Db<T>)>) -> String
+where
+    T: Debug,
+{
+    if let Some((rev, value)) = value {
+        format!("{{ rev: {}, value: {:?} }}", rev, value)
+    } else {
+        String::from("<null>")
+    }
 }

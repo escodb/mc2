@@ -26,7 +26,7 @@ impl<T> Act<T> {
 
 impl<T> fmt::Debug for Act<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Act[{}: ", self.client_id)?;
+        write!(f, "Act<{}: ", self.client_id)?;
 
         match &self.op {
             Op::Get => write!(f, "get('{}')", self.path)?,
@@ -37,7 +37,7 @@ impl<T> fmt::Debug for Act<T> {
             Op::Unlink(name) => write!(f, "unlink('{}', '{}')", self.path, name)?,
         };
 
-        write!(f, "]")
+        write!(f, ">")
     }
 }
 
