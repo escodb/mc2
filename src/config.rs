@@ -1,18 +1,16 @@
-#![allow(dead_code)]
-
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Update {
     ReadsBeforeLinks,
     GetBeforePut,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Remove {
     UnlinkReverseSequential,
     UnlinkParallel,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub update: Update,
     pub remove: Remove,

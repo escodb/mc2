@@ -7,10 +7,18 @@ mod planner;
 mod runner;
 mod store;
 
+use config::{Config, Remove, Update};
 use runner::Runner;
 
 fn main() {
     let mut runner = Runner::new();
+
+    runner.configs(&[
+        Config::new().update(Update::GetBeforePut),
+        Config::new().remove(Remove::UnlinkParallel),
+        Config::new().skip_links(true),
+        Config::new(),
+    ]);
 
     runner.add(
         "update/update conflict",
