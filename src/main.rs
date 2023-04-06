@@ -7,7 +7,7 @@ mod planner;
 mod runner;
 mod store;
 
-use config::{Config, Remove, Update};
+use config::{Cas, Config, Remove, Update};
 use runner::Runner;
 
 fn main() {
@@ -17,6 +17,7 @@ fn main() {
         Config::new().update(Update::GetBeforePut),
         Config::new().remove(Remove::UnlinkParallel),
         Config::new().skip_links(true),
+        Config::new().store(Cas::LaxDelete),
         Config::new(),
     ]);
 

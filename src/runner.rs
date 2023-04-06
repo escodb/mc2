@@ -122,7 +122,7 @@ where
         let mut planner = Planner::new(self.config.clone());
         (self.scenario.init)(planner.client("tmp"));
 
-        let store = RefCell::new(DbStore::new());
+        let store = RefCell::new(DbStore::new(self.config.clone()));
         let mut actor = Actor::new(&store, self.config.clone());
 
         for act in planner.orderings().next().unwrap() {
@@ -241,12 +241,16 @@ fn format_number(n: usize) -> String {
         .join(",")
 }
 
-fn format_value<T>(value: Option<(usize, Db<T>)>) -> String
+fn format_value<T>(value: Option<(usize, Option<Db<T>>)>) -> String
 where
     T: Debug,
 {
     if let Some((rev, value)) = value {
-        format!("{{ rev: {}, value: {:?} }}", rev, value)
+        if let Some(value) = value {
+            format!("{{ rev: {}, value: {:?} }}", rev, value)
+        } else {
+            format!("{{ rev: {}, value: <null> }}", rev)
+        }
     } else {
         String::from("<null>")
     }

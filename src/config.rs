@@ -10,11 +10,18 @@ pub enum Remove {
     UnlinkParallel,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Cas {
+    Strict,
+    LaxDelete,
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub update: Update,
     pub remove: Remove,
     pub skip_links: bool,
+    pub store: Cas,
 }
 
 impl Default for Config {
@@ -23,6 +30,7 @@ impl Default for Config {
             update: Update::ReadsBeforeLinks,
             remove: Remove::UnlinkReverseSequential,
             skip_links: false,
+            store: Cas::Strict,
         }
     }
 }
@@ -44,6 +52,11 @@ impl Config {
 
     pub fn skip_links(mut self, mode: bool) -> Config {
         self.skip_links = mode;
+        self
+    }
+
+    pub fn store(mut self, mode: Cas) -> Config {
+        self.store = mode;
         self
     }
 }
