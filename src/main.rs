@@ -1,14 +1,5 @@
-mod actor;
-mod config;
-mod db;
-mod graph;
-mod path;
-mod planner;
-mod runner;
-mod store;
-
-use config::{Cas, Config, Remove, Update};
-use runner::Runner;
+use mc2::config::{Cas, Config, Remove, Update};
+use mc2::runner::Runner;
 
 fn main() {
     let mut runner = Runner::new();
