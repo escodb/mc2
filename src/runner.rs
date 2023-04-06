@@ -18,6 +18,7 @@ struct Scenario<T> {
 pub struct Runner<T> {
     configs: Vec<Config>,
     scenarios: Vec<Scenario<T>>,
+    results: Vec<(Config, Vec<(String, bool, usize)>)>,
 }
 
 impl<T> Runner<T>
@@ -28,6 +29,7 @@ where
         Runner {
             configs: Vec::new(),
             scenarios: Vec::new(),
+            results: Vec::new(),
         }
     }
 
@@ -47,15 +49,40 @@ where
         });
     }
 
-    pub fn run(&self) {
+    pub fn run(&mut self) {
         for config in &self.configs {
             println!("{}\n\n{:?}\n", SPLIT, config);
+            let mut results = Vec::new();
 
             for scenario in &self.scenarios {
                 let runner = RunnerScenario::new(config.clone(), scenario);
-                runner.run();
+                let result = runner.run();
+                results.push((scenario.name.clone(), result.is_passed(), result.count()));
             }
+            self.results.push((config.clone(), results));
         }
+        self.print_summary();
+    }
+
+    fn print_summary(&self) {
+        println!("{}", SPLIT);
+        println!("SUMMARY");
+        println!("{}", SPLIT);
+        println!("");
+
+        let mut total = 0;
+
+        for (config, results) in &self.results {
+            println!("{:?}", config);
+            for (name, passed, count) in results {
+                let status = if *passed { "PASS" } else { "FAIL" };
+                total += count;
+                println!("    - {} ({}): {}", status, format_number(*count), name);
+            }
+            println!("");
+        }
+        println!("Total executions checked = {}", format_number(total));
+        println!("");
     }
 }
 
@@ -80,13 +107,15 @@ where
         }
     }
 
-    fn run(&self) {
+    fn run(&self) -> TestResult<T> {
         println!("Scenario: {}", self.scenario.name);
 
         let result = self.check_execution();
         result.print();
 
         println!("");
+
+        result
     }
 
     fn create_store(&self) -> DbStore<T> {
