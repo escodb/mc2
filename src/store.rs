@@ -2,11 +2,14 @@ use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+use crate::config::{Cas, Config};
+
 pub type Rev = usize;
 
 #[derive(Clone)]
 pub struct Store<K, V> {
     data: BTreeMap<K, (Rev, Option<V>)>,
+    config: Config,
     pub seq: Rev,
 }
 
@@ -15,11 +18,16 @@ where
     K: Ord,
     V: Clone,
 {
-    pub fn new() -> Store<K, V> {
+    pub fn new(config: Config) -> Store<K, V> {
         Store {
             data: BTreeMap::new(),
+            config,
             seq: 0,
         }
+    }
+
+    fn is_strict(&self) -> bool {
+        self.config.store == Cas::Strict
     }
 
     pub fn get<Q>(&self, key: &Q) -> Option<&V>
@@ -39,10 +47,18 @@ where
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        if let Some((rev, value)) = self.data.get(key) {
-            Some((*rev, value.clone()))
+        if self.is_strict() {
+            if let Some((rev, value)) = self.data.get(key) {
+                Some((*rev, value.clone()))
+            } else {
+                None
+            }
         } else {
-            None
+            if let Some((rev, Some(value))) = self.data.get(key) {
+                Some((*rev, Some(value.clone())))
+            } else {
+                None
+            }
         }
     }
 
@@ -56,9 +72,10 @@ where
 
     fn set_key(&mut self, key: K, rev: Option<Rev>, value: Option<V>) -> Option<Rev> {
         let client_rev = rev.unwrap_or(0);
+        let is_strict = self.is_strict();
         let entry = self.data.entry(key).or_insert((0, None));
 
-        if entry.0 != client_rev {
+        if (is_strict || entry.1.is_some()) && entry.0 != client_rev {
             return None;
         }
 
@@ -149,14 +166,14 @@ mod tests {
 
     #[test]
     fn returns_none_for_unknown_key() {
-        let store: Store<String, ()> = Store::new();
+        let store: Store<String, ()> = Store::new(Config::new());
         assert_eq!(store.seq, 0);
         assert_eq!(store.read("x"), None);
     }
 
     #[test]
     fn stores_a_new_value() {
-        let mut store: Store<String, _> = Store::new();
+        let mut store: Store<String, _> = Store::new(Config::new());
         assert_eq!(store.write("x".into(), None, 'a'), Some(1));
         assert_eq!(store.seq, 1);
         assert_eq!(store.read("x"), Some((1, Some('a'))));
@@ -164,7 +181,7 @@ mod tests {
 
     #[test]
     fn does_not_update_a_value_without_a_rev() {
-        let mut store: Store<String, _> = Store::new();
+        let mut store: Store<String, _> = Store::new(Config::new());
         store.write("x".into(), None, 'a');
 
         assert_eq!(store.write("x".into(), None, 'b'), None);
@@ -174,7 +191,7 @@ mod tests {
 
     #[test]
     fn does_not_update_a_value_with_a_bad_rev() {
-        let mut store: Store<String, _> = Store::new();
+        let mut store: Store<String, _> = Store::new(Config::new());
         let rev = store.write("x".into(), None, 'a').unwrap();
 
         assert_eq!(store.write("x".into(), Some(rev + 1), 'b'), None);
@@ -184,7 +201,7 @@ mod tests {
 
     #[test]
     fn updates_a_value_with_a_matching_rev() {
-        let mut store: Store<String, _> = Store::new();
+        let mut store: Store<String, _> = Store::new(Config::new());
         let rev = store.write("x".into(), None, 'a').unwrap();
 
         assert_eq!(store.write("x".into(), Some(rev), 'b'), Some(2));
@@ -194,7 +211,7 @@ mod tests {
 
     #[test]
     fn removes_a_value() {
-        let mut store: Store<String, _> = Store::new();
+        let mut store: Store<String, _> = Store::new(Config::new());
         let rev = store.write("x".into(), None, 'a').unwrap();
 
         assert_eq!(store.remove("x".into(), Some(rev)), Some(2));
@@ -203,7 +220,7 @@ mod tests {
 
     #[test]
     fn does_not_allow_stale_write_after_remove() {
-        let mut store: Store<String, _> = Store::new();
+        let mut store: Store<String, _> = Store::new(Config::new());
         let rev = store.write("x".into(), None, 'a').unwrap();
 
         assert_eq!(store.remove("x".into(), Some(rev)), Some(2));
@@ -212,8 +229,27 @@ mod tests {
     }
 
     #[test]
+    fn in_lax_mode_does_not_return_a_rev_after_remove() {
+        let mut store: Store<String, _> = Store::new(Config::new().store(Cas::LaxDelete));
+        let rev = store.write("x".into(), None, 'a').unwrap();
+
+        assert_eq!(store.remove("x".into(), Some(rev)), Some(2));
+        assert_eq!(store.read("x"), None);
+    }
+
+    #[test]
+    fn in_lax_mode_allows_stale_write_after_remove() {
+        let mut store: Store<String, _> = Store::new(Config::new().store(Cas::LaxDelete));
+        let rev = store.write("x".into(), None, 'a').unwrap();
+
+        assert_eq!(store.remove("x".into(), Some(rev)), Some(2));
+        assert_eq!(store.write("x".into(), None, 'b'), Some(3));
+        assert_eq!(store.read("x"), Some((3, Some('b'))));
+    }
+
+    #[test]
     fn updates_a_different_key() {
-        let mut store: Store<String, _> = Store::new();
+        let mut store: Store<String, _> = Store::new(Config::new());
         store.write("x".into(), None, 'a').unwrap();
 
         assert_eq!(store.write("y".into(), None, 'z'), Some(1));
@@ -224,7 +260,7 @@ mod tests {
 
     #[test]
     fn returns_a_copy_of_the_stored_value() {
-        let mut store: Store<String, _> = Store::new();
+        let mut store: Store<String, _> = Store::new(Config::new());
         store.write("x".into(), None, vec![4, 5, 6]);
 
         let mut a = store.read("x").unwrap().1.unwrap();
@@ -235,7 +271,7 @@ mod tests {
 
     #[test]
     fn returns_all_the_keys_in_the_store() {
-        let mut store: Store<String, _> = Store::new();
+        let mut store: Store<String, _> = Store::new(Config::new());
 
         store.write("/".into(), None, 'a');
         store.write("/path/".into(), None, 'b');
@@ -247,7 +283,7 @@ mod tests {
 
     #[test]
     fn returns_none_for_an_unknown_key() {
-        let store: RefCell<Store<String, ()>> = RefCell::new(Store::new());
+        let store: RefCell<Store<String, ()>> = RefCell::new(Store::new(Config::new()));
         let mut cache = Cache::new(&store);
 
         assert_eq!(cache.read("x"), None);
@@ -255,7 +291,7 @@ mod tests {
 
     #[test]
     fn reads_a_value_from_the_store() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(store.borrow_mut().write("x".into(), None, 'a'), Some(1));
@@ -264,7 +300,7 @@ mod tests {
 
     #[test]
     fn returns_a_copy_of_the_cached_value() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut cache: Cache<String, _> = Cache::new(&store);
 
         cache.write(&"x".into(), vec![4, 5, 6]);
@@ -277,7 +313,7 @@ mod tests {
 
     #[test]
     fn caches_a_read_that_returns_none() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.read("x"), None);
@@ -287,7 +323,7 @@ mod tests {
 
     #[test]
     fn writes_a_value_to_the_store() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write(&"x".into(), 'a'), true);
@@ -298,7 +334,7 @@ mod tests {
 
     #[test]
     fn updates_a_value_in_the_store() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write(&"x".into(), 'a'), true);
@@ -311,7 +347,7 @@ mod tests {
 
     #[test]
     fn removes_a_value_from_the_store() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write(&"x".into(), 'a'), true);
@@ -323,7 +359,7 @@ mod tests {
 
     #[test]
     fn fails_to_update_a_doc_it_did_not_read_first() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(store.borrow_mut().write("x".into(), None, 'a'), Some(1));
@@ -335,7 +371,7 @@ mod tests {
 
     #[test]
     fn fails_to_update_with_a_stale_read() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write(&"x".into(), 'a'), true);
@@ -348,7 +384,7 @@ mod tests {
 
     #[test]
     fn fails_to_delete_with_a_stale_read() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write(&"x".into(), 'a'), true);
@@ -361,7 +397,7 @@ mod tests {
 
     #[test]
     fn recovers_after_a_failed_write() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut cache: Cache<String, _> = Cache::new(&store);
 
         assert_eq!(cache.write(&"x".into(), 'a'), true);
@@ -378,7 +414,7 @@ mod tests {
 
     #[test]
     fn allows_multiple_clients_to_mutate_the_store() {
-        let store = RefCell::new(Store::new());
+        let store = RefCell::new(Store::new(Config::new()));
         let mut a: Cache<String, _> = Cache::new(&store);
         let mut b: Cache<String, _> = Cache::new(&store);
 

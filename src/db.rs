@@ -83,9 +83,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
 
     fn make_store() -> DbStore<char> {
-        let mut store = DbStore::new();
+        let mut store = DbStore::new(Config::new());
 
         store.write("/".into(), None, Db::dir_from(&["path/"]));
         store.write("/path/".into(), None, Db::dir_from(&["to/"]));

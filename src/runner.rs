@@ -122,7 +122,7 @@ where
         let mut planner = Planner::new(self.config.clone());
         (self.scenario.init)(planner.client("tmp"));
 
-        let store = RefCell::new(DbStore::new());
+        let store = RefCell::new(DbStore::new(self.config.clone()));
         let mut actor = Actor::new(&store, self.config.clone());
 
         for act in planner.orderings().next().unwrap() {

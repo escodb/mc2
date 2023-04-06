@@ -149,7 +149,7 @@ mod tests {
     }
 
     fn make_store() -> RefCell<DbStore<Vec<char>>> {
-        let mut store = DbStore::new();
+        let mut store = DbStore::new(Config::new());
 
         store.write("/".into(), None, Db::dir_from(&["path/"]));
         store.write("/path/".into(), None, Db::dir_from(&["to/", "x.json"]));
