@@ -34,12 +34,12 @@ where
         }
     }
 
-    pub fn read<Q>(&self, key: &Q) -> Option<(Rev, V)>
+    pub fn read<Q>(&self, key: &Q) -> Option<(Rev, Option<V>)>
     where
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        if let Some((rev, Some(value))) = self.data.get(key) {
+        if let Some((rev, value)) = self.data.get(key) {
             Some((*rev, value.clone()))
         } else {
             None
@@ -75,7 +75,7 @@ where
 
 pub struct Cache<'a, K, V> {
     store: &'a RefCell<Store<K, V>>,
-    data: BTreeMap<K, Option<(Rev, V)>>,
+    data: BTreeMap<K, Option<(Rev, Option<V>)>>,
 }
 
 impl<K, V> Cache<'_, K, V>
@@ -101,7 +101,7 @@ where
             self.data.insert(key.into(), record);
         }
 
-        if let Some(Some((_, value))) = self.data.get(key) {
+        if let Some(Some((_, Some(value)))) = self.data.get(key) {
             Some(value.clone())
         } else {
             None
@@ -113,7 +113,7 @@ where
         let mut store = self.store.borrow_mut();
 
         if let Some(new_rev) = store.write(key.clone(), old_rev, value.clone()) {
-            self.data.insert(key.clone(), Some((new_rev, value)));
+            self.data.insert(key.clone(), Some((new_rev, Some(value))));
             true
         } else {
             self.data.remove(key);
@@ -159,7 +159,7 @@ mod tests {
         let mut store: Store<String, _> = Store::new();
         assert_eq!(store.write("x".into(), None, 'a'), Some(1));
         assert_eq!(store.seq, 1);
-        assert_eq!(store.read("x"), Some((1, 'a')));
+        assert_eq!(store.read("x"), Some((1, Some('a'))));
     }
 
     #[test]
@@ -169,7 +169,7 @@ mod tests {
 
         assert_eq!(store.write("x".into(), None, 'b'), None);
         assert_eq!(store.seq, 1);
-        assert_eq!(store.read("x"), Some((1, 'a')));
+        assert_eq!(store.read("x"), Some((1, Some('a'))));
     }
 
     #[test]
@@ -179,7 +179,7 @@ mod tests {
 
         assert_eq!(store.write("x".into(), Some(rev + 1), 'b'), None);
         assert_eq!(store.seq, 1);
-        assert_eq!(store.read("x"), Some((1, 'a')));
+        assert_eq!(store.read("x"), Some((1, Some('a'))));
     }
 
     #[test]
@@ -189,7 +189,7 @@ mod tests {
 
         assert_eq!(store.write("x".into(), Some(rev), 'b'), Some(2));
         assert_eq!(store.seq, 2);
-        assert_eq!(store.read("x"), Some((2, 'b')));
+        assert_eq!(store.read("x"), Some((2, Some('b'))));
     }
 
     #[test]
@@ -198,7 +198,17 @@ mod tests {
         let rev = store.write("x".into(), None, 'a').unwrap();
 
         assert_eq!(store.remove("x".into(), Some(rev)), Some(2));
-        assert_eq!(store.read("x"), None);
+        assert_eq!(store.read("x"), Some((2, None)));
+    }
+
+    #[test]
+    fn does_not_allow_stale_write_after_remove() {
+        let mut store: Store<String, _> = Store::new();
+        let rev = store.write("x".into(), None, 'a').unwrap();
+
+        assert_eq!(store.remove("x".into(), Some(rev)), Some(2));
+        assert_eq!(store.write("x".into(), None, 'b'), None);
+        assert_eq!(store.read("x"), Some((2, None)));
     }
 
     #[test]
@@ -208,8 +218,8 @@ mod tests {
 
         assert_eq!(store.write("y".into(), None, 'z'), Some(1));
         assert_eq!(store.seq, 2);
-        assert_eq!(store.read("x"), Some((1, 'a')));
-        assert_eq!(store.read("y"), Some((1, 'z')));
+        assert_eq!(store.read("x"), Some((1, Some('a'))));
+        assert_eq!(store.read("y"), Some((1, Some('z'))));
     }
 
     #[test]
@@ -217,10 +227,10 @@ mod tests {
         let mut store: Store<String, _> = Store::new();
         store.write("x".into(), None, vec![4, 5, 6]);
 
-        let (_, mut a) = store.read("x").unwrap();
+        let mut a = store.read("x").unwrap().1.unwrap();
         a.push(7);
 
-        assert_eq!(store.read("x"), Some((1, vec![4, 5, 6])));
+        assert_eq!(store.read("x"), Some((1, Some(vec![4, 5, 6]))));
     }
 
     #[test]
@@ -282,7 +292,7 @@ mod tests {
 
         assert_eq!(cache.write(&"x".into(), 'a'), true);
 
-        assert_eq!(store.borrow().read("x"), Some((1, 'a')));
+        assert_eq!(store.borrow().read("x"), Some((1, Some('a'))));
         assert_eq!(cache.read("x"), Some('a'));
     }
 
@@ -295,7 +305,7 @@ mod tests {
         assert_eq!(cache.write(&"x".into(), 'b'), true);
         assert_eq!(cache.write(&"x".into(), 'c'), true);
 
-        assert_eq!(store.borrow().read("x"), Some((3, 'c')));
+        assert_eq!(store.borrow().read("x"), Some((3, Some('c'))));
         assert_eq!(cache.read("x"), Some('c'));
     }
 
@@ -307,7 +317,7 @@ mod tests {
         assert_eq!(cache.write(&"x".into(), 'a'), true);
         assert_eq!(cache.remove(&"x".into()), true);
 
-        assert_eq!(store.borrow().read("x"), None);
+        assert_eq!(store.borrow().read("x"), Some((2, None)));
         assert_eq!(cache.read("x"), None);
     }
 
@@ -319,7 +329,7 @@ mod tests {
         assert_eq!(store.borrow_mut().write("x".into(), None, 'a'), Some(1));
         assert_eq!(cache.write(&"x".into(), 'b'), false);
 
-        assert_eq!(store.borrow().read("x"), Some((1, 'a')));
+        assert_eq!(store.borrow().read("x"), Some((1, Some('a'))));
         assert_eq!(cache.read("x"), Some('a'));
     }
 
@@ -333,7 +343,7 @@ mod tests {
         assert_eq!(store.borrow_mut().write("x".into(), Some(1), 'c'), Some(2));
         assert_eq!(cache.write(&"x".into(), 'b'), false);
 
-        assert_eq!(store.borrow().read("x"), Some((2, 'c')));
+        assert_eq!(store.borrow().read("x"), Some((2, Some('c'))));
     }
 
     #[test]
@@ -346,7 +356,7 @@ mod tests {
         assert_eq!(store.borrow_mut().write("x".into(), Some(1), 'c'), Some(2));
         assert_eq!(cache.remove(&"x".into()), false);
 
-        assert_eq!(store.borrow().read("x"), Some((2, 'c')));
+        assert_eq!(store.borrow().read("x"), Some((2, Some('c'))));
     }
 
     #[test]
@@ -362,7 +372,7 @@ mod tests {
         assert_eq!(cache.read("x"), Some('c'));
         assert_eq!(cache.write(&"x".into(), 'b'), true);
 
-        assert_eq!(store.borrow().read("x"), Some((3, 'b')));
+        assert_eq!(store.borrow().read("x"), Some((3, Some('b'))));
         assert_eq!(cache.read("x"), Some('b'));
     }
 

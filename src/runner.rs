@@ -241,12 +241,16 @@ fn format_number(n: usize) -> String {
         .join(",")
 }
 
-fn format_value<T>(value: Option<(usize, Db<T>)>) -> String
+fn format_value<T>(value: Option<(usize, Option<Db<T>>)>) -> String
 where
     T: Debug,
 {
     if let Some((rev, value)) = value {
-        format!("{{ rev: {}, value: {:?} }}", rev, value)
+        if let Some(value) = value {
+            format!("{{ rev: {}, value: {:?} }}", rev, value)
+        } else {
+            format!("{{ rev: {}, value: <null> }}", rev)
+        }
     } else {
         String::from("<null>")
     }
