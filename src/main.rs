@@ -1,95 +1,193 @@
 mod actor;
+mod config;
 mod db;
 mod graph;
 mod path;
 mod planner;
+mod runner;
 mod store;
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::fmt::Debug;
-
-use actor::Actor;
-use db::{check_consistency, DbStore};
-use planner::{Act, Op, Planner};
+use config::{Config, Remove, Update};
+use runner::Runner;
 
 fn main() {
-    let mut planner = Planner::new();
+    let mut runner = Runner::new();
 
-    planner
-        .client("A")
-        .update("/path/to/x", |_| Some(vec!['a', 'b']));
+    runner.configs(&[
+        Config::new().update(Update::GetBeforePut),
+        Config::new().remove(Remove::UnlinkParallel),
+        Config::new().skip_links(true),
+        Config::new(),
+    ]);
 
-    planner.client("B").update("/path/to/x", |doc| {
-        let mut doc: Vec<_> = doc?.iter().cloned().rev().collect();
-        doc.push('z');
-        Some(doc)
-    });
+    runner.add(
+        "update/update conflict",
+        |mut db| {
+            db.update("/path/x", |_| Some(('x', 1)));
+        },
+        |planner| {
+            planner.client("A").update("/path/x", |_| Some(('x', 2)));
+            planner.client("B").update("/path/x", |_| Some(('x', 3)));
+        },
+    );
 
-    let store = DbStore::new();
-    let mut count = 0;
+    runner.add(
+        "update/update conflict (missing)",
+        |mut db| {
+            db.update("/path/x", |_| Some(('x', 1)));
+        },
+        |planner| {
+            planner.client("A").update("/path/y", |_| Some(('y', 2)));
+            planner.client("B").update("/path/y", |_| Some(('y', 3)));
+        },
+    );
 
-    for acts in planner.orderings() {
-        let st = RefCell::new(store.clone());
+    runner.add(
+        "update/delete conflict",
+        |mut db| {
+            db.update("/path/x", |_| Some(('x', 1)));
+        },
+        |planner| {
+            planner.client("A").update("/path/x", |_| Some(('x', 2)));
+            planner.client("B").remove("/path/x");
+        },
+    );
 
-        let mut actors: HashMap<_, _> = planner
-            .clients()
-            .map(|id| (id.to_string(), Actor::new(&st)))
-            .collect();
+    runner.add(
+        "update/delete conflict (missing)",
+        |mut db| {
+            db.update("/path/x", |_| Some(('x', 1)));
+        },
+        |planner| {
+            planner.client("A").update("/path/y", |_| Some(('y', 2)));
+            planner.client("B").remove("/path/y");
+        },
+    );
 
-        for act in acts {
-            dispatch(&mut actors, act);
+    runner.add(
+        "delete, create sibling",
+        |mut db| {
+            db.update("/path/x", |_| Some(('x', 1)));
+        },
+        |planner| {
+            planner.client("A").remove("/path/x");
+            planner.client("B").update("/path/y", |_| Some(('y', 2)));
+        },
+    );
 
-            if let Err(errors) = check_consistency(&st.borrow()) {
-                println!("failure: {:?}", errors);
-                print_store(&st.borrow());
-            }
-        }
+    runner.add(
+        "delete, create in parent",
+        |mut db| {
+            db.update("/path/to/x", |_| Some(('x', 1)));
+        },
+        |planner| {
+            planner.client("A").remove("/path/to/x");
+            planner.client("B").update("/path/y", |_| Some(('y', 2)));
+        },
+    );
 
-        count += 1;
+    runner.add(
+        "delete, create in grandparent",
+        |mut db| {
+            db.update("/path/to/x", |_| Some(('x', 1)));
+        },
+        |planner| {
+            planner.client("A").remove("/path/to/x");
+            planner.client("B").update("/y", |_| Some(('y', 2)));
+        },
+    );
 
-        if count == 1 {
-            print_store(&st.borrow());
-        }
-    }
-    println!("orderings checked: {}", count);
-}
+    runner.add(
+        "delete, create in child",
+        |mut db| {
+            db.update("/path/x", |_| Some(('x', 1)));
+        },
+        |planner| {
+            planner.client("A").remove("/path/x");
+            planner.client("B").update("/path/to/y", |_| Some(('y', 2)));
+        },
+    );
 
-fn dispatch<T>(actors: &mut HashMap<String, Actor<T>>, act: &Act<T>)
-where
-    T: Clone,
-{
-    let actor = actors.get_mut(&act.client_id).unwrap();
+    runner.add(
+        "delete, create in grandchild",
+        |mut db| {
+            db.update("/x", |_| Some(('x', 1)));
+        },
+        |planner| {
+            planner.client("A").remove("/x");
+            planner.client("B").update("/path/to/y", |_| Some(('y', 2)));
+        },
+    );
 
-    match &act.op {
-        Op::Get => {
-            actor.get(&act.path);
-        }
-        Op::Put(update) => {
-            actor.put(&act.path, update);
-        }
-        Op::Rm => {
-            actor.rm(&act.path);
-        }
-        Op::List => {
-            actor.list(&act.path);
-        }
-        Op::Link(name) => {
-            actor.link(&act.path, name);
-        }
-        Op::Unlink(name) => {
-            actor.unlink(&act.path, name);
-        }
-    }
-}
+    runner.add(
+        "delete, update sibling",
+        |mut db| {
+            db.update("/path/x", |_| Some(('x', 1)));
+            db.update("/path/y", |_| Some(('y', 1)));
+        },
+        |planner| {
+            planner.client("A").remove("/path/x");
+            planner
+                .client("B")
+                .update("/path/y", |doc| doc.map(|(k, n)| (k, n + 1)));
+        },
+    );
 
-fn print_store<T>(store: &DbStore<T>)
-where
-    T: Clone + Debug,
-{
-    for key in store.keys() {
-        if let Some((rev, value)) = store.read(key) {
-            println!("    '{}' => rev: {:?}, value: {:?}", key, rev, value);
-        }
-    }
+    runner.add(
+        "delete, update in parent",
+        |mut db| {
+            db.update("/path/to/x", |_| Some(('x', 1)));
+            db.update("/path/y", |_| Some(('y', 1)));
+        },
+        |planner| {
+            planner.client("A").remove("/path/to/x");
+            planner
+                .client("B")
+                .update("/path/y", |doc| doc.map(|(k, n)| (k, n + 1)));
+        },
+    );
+
+    runner.add(
+        "delete, update in grandparent",
+        |mut db| {
+            db.update("/path/to/x", |_| Some(('x', 1)));
+            db.update("/y", |_| Some(('y', 1)));
+        },
+        |planner| {
+            planner.client("A").remove("/path/to/x");
+            planner
+                .client("B")
+                .update("/y", |doc| doc.map(|(k, n)| (k, n + 1)));
+        },
+    );
+
+    runner.add(
+        "delete, update in child",
+        |mut db| {
+            db.update("/path/x", |_| Some(('x', 1)));
+            db.update("/path/to/y", |_| Some(('y', 1)));
+        },
+        |planner| {
+            planner.client("A").remove("/path/x");
+            planner
+                .client("B")
+                .update("/path/to/y", |doc| doc.map(|(k, n)| (k, n + 1)));
+        },
+    );
+
+    runner.add(
+        "delete, update in grandchild",
+        |mut db| {
+            db.update("/x", |_| Some(('x', 1)));
+            db.update("/path/to/y", |_| Some(('y', 1)));
+        },
+        |planner| {
+            planner.client("A").remove("/x");
+            planner
+                .client("B")
+                .update("/path/to/y", |doc| doc.map(|(k, n)| (k, n + 1)));
+        },
+    );
+
+    runner.run();
 }

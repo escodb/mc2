@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-type Rev = usize;
+pub type Rev = usize;
 
 #[derive(Clone)]
 pub struct Store<K, V> {
