@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
+use std::borrow::Borrow;
 use std::fmt;
-use std::ops::Deref;
 
 const SEP: char = '/';
 
-#[derive(Eq, PartialEq)]
+#[derive(Clone, Eq)]
 pub struct Path {
     original: String,
     parts: Vec<(String, String)>,
@@ -23,17 +23,39 @@ impl fmt::Display for Path {
     }
 }
 
-impl From<&str> for Path {
-    fn from(value: &str) -> Path {
-        Path::new(value)
+impl Borrow<str> for Path {
+    fn borrow(&self) -> &str {
+        &self.original
     }
 }
 
-impl Deref for Path {
-    type Target = str;
+impl PartialEq for Path {
+    fn eq(&self, other: &Path) -> bool {
+        self.original.eq(&other.original)
+    }
+}
 
-    fn deref(&self) -> &Self::Target {
-        &self.original
+impl PartialOrd for Path {
+    fn partial_cmp(&self, other: &Path) -> Option<std::cmp::Ordering> {
+        self.original.partial_cmp(&other.original)
+    }
+}
+
+impl Ord for Path {
+    fn cmp(&self, other: &Path) -> std::cmp::Ordering {
+        self.original.cmp(&other.original)
+    }
+}
+
+impl From<&Path> for Path {
+    fn from(value: &Path) -> Path {
+        value.clone()
+    }
+}
+
+impl From<&str> for Path {
+    fn from(value: &str) -> Path {
+        Path::new(value)
     }
 }
 
@@ -58,7 +80,7 @@ fn parse(path: &str) -> Vec<(String, String)> {
 impl Path {
     pub fn new(name: &str) -> Path {
         Path {
-            original: name.into(),
+            original: name.to_string(),
             parts: parse(name),
         }
     }
@@ -93,12 +115,6 @@ impl Path {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn derefs_to_str() {
-        let path = Path::from("/foo");
-        assert_eq!(path.deref(), "/foo");
-    }
 
     #[test]
     fn is_valid_if_it_begins_with_a_slash() {

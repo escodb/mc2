@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::path::Path;
-use crate::store::Store;
+use crate::store::{Cache, Store};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Db<T> {
@@ -17,7 +17,10 @@ impl<T> Db<T> {
     }
 }
 
-pub fn check_consistency<T>(store: &Store<Db<T>>) -> Result<(), Vec<String>>
+pub type DbCache<'a, T> = Cache<'a, Path, Db<T>>;
+pub type DbStore<T> = Store<Path, Db<T>>;
+
+pub fn check_consistency<T>(store: &DbStore<T>) -> Result<(), Vec<String>>
 where
     T: Clone,
 {
@@ -36,7 +39,7 @@ where
 }
 
 struct Checker<'a, T> {
-    store: &'a Store<Db<T>>,
+    store: &'a DbStore<T>,
     errors: Vec<String>,
 }
 
@@ -45,19 +48,16 @@ where
     T: Clone,
 {
     fn check(&mut self) {
-        let paths = self.store.keys().map(|k| Path::from(k));
-
-        for doc in paths.filter(|p| p.is_doc()) {
-            if self.store.read(&doc).is_none() {
-                continue;
+        for path in self.store.keys() {
+            if path.is_doc() && self.store.get(path).is_some() {
+                self.check_doc(&path);
             }
-            self.check_doc(&doc);
         }
     }
 
     fn check_doc(&mut self, doc: &Path) {
         for (dir, name) in doc.links() {
-            if let Some((_, Db::Dir(entries))) = self.store.read(dir) {
+            if let Some(Db::Dir(entries)) = self.store.get(dir) {
                 if !entries.contains(name) {
                     self.errors.push(format!(
                         "dir '{}' does not include name '{}', required by doc '{}'",
@@ -78,13 +78,13 @@ where
 mod tests {
     use super::*;
 
-    fn make_store() -> Store<Db<char>> {
-        let mut store = Store::new();
+    fn make_store() -> DbStore<char> {
+        let mut store = DbStore::new();
 
-        store.write("/", None, Db::dir_from(&["path/"]));
-        store.write("/path/", None, Db::dir_from(&["to/"]));
-        store.write("/path/to/", None, Db::dir_from(&["x.json"]));
-        store.write("/path/to/x.json", None, Db::Doc('a'));
+        store.write("/".into(), None, Db::dir_from(&["path/"]));
+        store.write("/path/".into(), None, Db::dir_from(&["to/"]));
+        store.write("/path/to/".into(), None, Db::dir_from(&["x.json"]));
+        store.write("/path/to/x.json".into(), None, Db::Doc('a'));
 
         store
     }
@@ -98,7 +98,7 @@ mod tests {
     #[test]
     fn complains_if_a_doc_is_not_linked() {
         let mut store = make_store();
-        store.write("/path/to/", Some(1), Db::dir_from(&[]));
+        store.write("/path/to/".into(), Some(1), Db::dir_from(&[]));
 
         assert_eq!(
             check_consistency(&store),
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn complains_if_a_parent_dir_is_deleted() {
         let mut store = make_store();
-        store.remove("/path/to/", Some(1));
+        store.remove("/path/to/".into(), Some(1));
 
         assert_eq!(
             check_consistency(&store),
@@ -124,8 +124,8 @@ mod tests {
     #[test]
     fn complains_if_parent_dir_is_missing() {
         let mut store = make_store();
-        store.write("/", Some(1), Db::dir_from(&["other/", "path/"]));
-        store.write("/other/y.json", None, Db::Doc('b'));
+        store.write("/".into(), Some(1), Db::dir_from(&["other/", "path/"]));
+        store.write("/other/y.json".into(), None, Db::Doc('b'));
 
         assert_eq!(
             check_consistency(&store),
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn complains_if_a_parent_dir_is_not_linked() {
         let mut store = make_store();
-        store.write("/path/", Some(1), Db::dir_from(&[]));
+        store.write("/path/".into(), Some(1), Db::dir_from(&[]));
 
         assert_eq!(
             check_consistency(&store),
@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn complains_if_a_grandparent_dir_is_not_linked() {
         let mut store = make_store();
-        store.write("/", Some(1), Db::dir_from(&[]));
+        store.write("/".into(), Some(1), Db::dir_from(&[]));
 
         assert_eq!(
             check_consistency(&store),
@@ -164,8 +164,8 @@ mod tests {
     #[test]
     fn does_not_complain_if_an_ancestor_of_a_deleted_doc_is_unlinked() {
         let mut store = make_store();
-        store.write("/", Some(1), Db::dir_from(&[]));
-        store.remove("/path/to/x.json", Some(1));
+        store.write("/".into(), Some(1), Db::dir_from(&[]));
+        store.remove("/path/to/x.json".into(), Some(1));
 
         assert_eq!(check_consistency(&store), Ok(()));
     }

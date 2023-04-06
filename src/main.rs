@@ -10,9 +10,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use actor::Actor;
-use db::check_consistency;
+use db::{check_consistency, DbStore};
 use planner::{Act, Op, Planner};
-use store::Store;
 
 fn main() {
     let mut planner = Planner::new();
@@ -27,7 +26,7 @@ fn main() {
         Some(doc)
     });
 
-    let store = Store::new();
+    let store = DbStore::new();
     let mut count = 0;
 
     for acts in planner.orderings() {
@@ -84,7 +83,7 @@ where
     }
 }
 
-fn print_store<T>(store: &Store<T>)
+fn print_store<T>(store: &DbStore<T>)
 where
     T: Clone + Debug,
 {

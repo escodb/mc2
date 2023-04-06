@@ -14,10 +14,10 @@ pub struct Act<T> {
 }
 
 impl<T> Act<T> {
-    fn new(client_id: &str, path: &str, op: Op<T>) -> Act<T> {
+    fn new(client_id: &str, path: Path, op: Op<T>) -> Act<T> {
         Act {
             client_id: client_id.to_string(),
-            path: Path::from(path),
+            path,
             op,
         }
     }
@@ -77,7 +77,7 @@ impl<T> Planner<T> {
     }
 
     pub fn client(&mut self, id: &str) -> Client<T> {
-        self.clients.insert(id.into());
+        self.clients.insert(id.to_string());
         Client::new(&mut self.graph, id)
     }
 
@@ -98,13 +98,16 @@ pub struct Client<'a, T> {
 impl<'a, T> Client<'a, T> {
     fn new(graph: &'a mut Graph<Act<T>>, id: &str) -> Client<'a, T> {
         Client {
-            id: id.into(),
+            id: id.to_string(),
             graph,
         }
     }
 
-    fn act(&self, path: &str, op: Op<T>) -> Act<T> {
-        Act::new(&self.id, path, op)
+    fn act<P>(&self, path: P, op: Op<T>) -> Act<T>
+    where
+        P: Into<Path>,
+    {
+        Act::new(&self.id, path.into(), op)
     }
 
     fn do_reads(&mut self, path: &Path) -> Vec<Id> {
@@ -129,7 +132,7 @@ impl<'a, T> Client<'a, T> {
         let links: Vec<_> = path
             .links()
             .map(|(dir, name)| {
-                let link = self.act(dir, Op::Link(name.into()));
+                let link = self.act(dir, Op::Link(name.to_string()));
                 self.graph.add(&reads, link)
             })
             .collect();
@@ -145,7 +148,7 @@ impl<'a, T> Client<'a, T> {
         let mut op = self.graph.add(&reads, self.act(&path, Op::Rm));
 
         for (dir, name) in path.links().rev() {
-            let unlink = self.act(dir, Op::Unlink(name.into()));
+            let unlink = self.act(dir, Op::Unlink(name.to_string()));
             op = self.graph.add(&[op], unlink);
         }
     }
@@ -176,16 +179,16 @@ mod tests {
         check_graph(
             &planner.graph,
             &[
-                ("get", Act::new("A", "/x.json", Op::Get), &[]),
-                ("list", Act::new("A", "/", Op::List), &[]),
+                ("get", Act::new("A", "/x.json".into(), Op::Get), &[]),
+                ("list", Act::new("A", "/".into(), Op::List), &[]),
                 (
                     "link",
-                    Act::new("A", "/", Op::Link("x.json".into())),
+                    Act::new("A", "/".into(), Op::Link("x.json".into())),
                     &["get", "list"],
                 ),
                 (
                     "put",
-                    Act::new("A", "/x.json", Op::Put(Box::new(|d| d))),
+                    Act::new("A", "/x.json".into(), Op::Put(Box::new(|d| d))),
                     &["link"],
                 ),
             ],
@@ -201,22 +204,22 @@ mod tests {
         check_graph(
             &planner.graph,
             &[
-                ("get", Act::new("A", "/path/x.json", Op::Get), &[]),
-                ("list1", Act::new("A", "/", Op::List), &[]),
-                ("list2", Act::new("A", "/path/", Op::List), &[]),
+                ("get", Act::new("A", "/path/x.json".into(), Op::Get), &[]),
+                ("list1", Act::new("A", "/".into(), Op::List), &[]),
+                ("list2", Act::new("A", "/path/".into(), Op::List), &[]),
                 (
                     "link1",
-                    Act::new("A", "/", Op::Link("path/".into())),
+                    Act::new("A", "/".into(), Op::Link("path/".into())),
                     &["get", "list1", "list2"],
                 ),
                 (
                     "link2",
-                    Act::new("A", "/path/", Op::Link("x.json".into())),
+                    Act::new("A", "/path/".into(), Op::Link("x.json".into())),
                     &["get", "list1", "list2"],
                 ),
                 (
                     "put",
-                    Act::new("A", "/path/x.json", Op::Put(Box::new(|d| d))),
+                    Act::new("A", "/path/x.json".into(), Op::Put(Box::new(|d| d))),
                     &["link1", "link2"],
                 ),
             ],
@@ -232,28 +235,28 @@ mod tests {
         check_graph(
             &planner.graph,
             &[
-                ("get", Act::new("A", "/path/to/x.json", Op::Get), &[]),
-                ("list1", Act::new("A", "/", Op::List), &[]),
-                ("list2", Act::new("A", "/path/", Op::List), &[]),
-                ("list3", Act::new("A", "/path/to/", Op::List), &[]),
+                ("get", Act::new("A", "/path/to/x.json".into(), Op::Get), &[]),
+                ("list1", Act::new("A", "/".into(), Op::List), &[]),
+                ("list2", Act::new("A", "/path/".into(), Op::List), &[]),
+                ("list3", Act::new("A", "/path/to/".into(), Op::List), &[]),
                 (
                     "link1",
-                    Act::new("A", "/", Op::Link("path/".into())),
+                    Act::new("A", "/".into(), Op::Link("path/".into())),
                     &["get", "list1", "list2", "list3"],
                 ),
                 (
                     "link2",
-                    Act::new("A", "/path/", Op::Link("to/".into())),
+                    Act::new("A", "/path/".into(), Op::Link("to/".into())),
                     &["get", "list1", "list2", "list3"],
                 ),
                 (
                     "link3",
-                    Act::new("A", "/path/to/", Op::Link("x.json".into())),
+                    Act::new("A", "/path/to/".into(), Op::Link("x.json".into())),
                     &["get", "list1", "list2", "list3"],
                 ),
                 (
                     "put",
-                    Act::new("A", "/path/to/x.json", Op::Put(Box::new(|d| d))),
+                    Act::new("A", "/path/to/x.json".into(), Op::Put(Box::new(|d| d))),
                     &["link1", "link2", "link3"],
                 ),
             ],
@@ -269,12 +272,16 @@ mod tests {
         check_graph(
             &planner.graph,
             &[
-                ("get", Act::new("A", "/y.json", Op::Get), &[]),
-                ("list", Act::new("A", "/", Op::List), &[]),
-                ("rm", Act::new("A", "/y.json", Op::Rm), &["get", "list"]),
+                ("get", Act::new("A", "/y.json".into(), Op::Get), &[]),
+                ("list", Act::new("A", "/".into(), Op::List), &[]),
+                (
+                    "rm",
+                    Act::new("A", "/y.json".into(), Op::Rm),
+                    &["get", "list"],
+                ),
                 (
                     "unlink",
-                    Act::new("A", "/", Op::Unlink("y.json".into())),
+                    Act::new("A", "/".into(), Op::Unlink("y.json".into())),
                     &["rm"],
                 ),
             ],
@@ -290,28 +297,28 @@ mod tests {
         check_graph(
             &planner.graph,
             &[
-                ("get", Act::new("A", "/path/to/y.json", Op::Get), &[]),
-                ("list1", Act::new("A", "/", Op::List), &[]),
-                ("list2", Act::new("A", "/path/", Op::List), &[]),
-                ("list3", Act::new("A", "/path/to/", Op::List), &[]),
+                ("get", Act::new("A", "/path/to/y.json".into(), Op::Get), &[]),
+                ("list1", Act::new("A", "/".into(), Op::List), &[]),
+                ("list2", Act::new("A", "/path/".into(), Op::List), &[]),
+                ("list3", Act::new("A", "/path/to/".into(), Op::List), &[]),
                 (
                     "rm",
-                    Act::new("A", "/path/to/y.json", Op::Rm),
+                    Act::new("A", "/path/to/y.json".into(), Op::Rm),
                     &["get", "list1", "list2", "list3"],
                 ),
                 (
                     "unlink1",
-                    Act::new("A", "/path/to/", Op::Unlink("y.json".into())),
+                    Act::new("A", "/path/to/".into(), Op::Unlink("y.json".into())),
                     &["rm"],
                 ),
                 (
                     "unlink2",
-                    Act::new("A", "/path/", Op::Unlink("to/".into())),
+                    Act::new("A", "/path/".into(), Op::Unlink("to/".into())),
                     &["unlink1"],
                 ),
                 (
                     "unlink3",
-                    Act::new("A", "/", Op::Unlink("path/".into())),
+                    Act::new("A", "/".into(), Op::Unlink("path/".into())),
                     &["unlink2"],
                 ),
             ],
