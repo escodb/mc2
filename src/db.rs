@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use crate::path::Path;
 use crate::store::{Cache, Rev, Store};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Db<T> {
     Doc(T),
     Dir(BTreeSet<String>),
