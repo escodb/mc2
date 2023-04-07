@@ -23,7 +23,7 @@ pub struct Runner<T> {
 
 impl<T> Runner<T>
 where
-    T: Clone + std::fmt::Debug,
+    T: Clone + Debug,
 {
     pub fn new() -> Runner<T> {
         Runner {
