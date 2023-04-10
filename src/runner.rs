@@ -57,7 +57,7 @@ where
             for scenario in &self.scenarios {
                 let runner = RunnerScenario::new(config.clone(), scenario);
                 let result = runner.run();
-                results.push((scenario.name.clone(), result.is_passed(), result.count()));
+                results.push((scenario.name.clone(), result.is_pass(), result.count()));
             }
             self.results.push((config.clone(), results));
         }
@@ -182,7 +182,7 @@ impl<T> TestResult<'_, T>
 where
     T: Clone + Debug,
 {
-    fn is_passed(&self) -> bool {
+    fn is_pass(&self) -> bool {
         match self {
             TestResult::Pass { .. } => true,
             TestResult::Fail { .. } => false,
@@ -197,7 +197,7 @@ where
     }
 
     fn print(&self) {
-        let status = if self.is_passed() { "PASS" } else { "FAIL" };
+        let status = if self.is_pass() { "PASS" } else { "FAIL" };
         println!("    result: {}", status);
         println!("    checked executions: {}", format_number(self.count()));
 
