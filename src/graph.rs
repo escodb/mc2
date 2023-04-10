@@ -43,7 +43,7 @@ impl<T> Graph<T> {
     }
 }
 
-fn permute(nodes: Vec<(Id, Vec<Id>)>) -> Box<dyn Iterator<Item = Vec<Id>>> {
+fn permute(nodes: Vec<(Id, Vec<Id>)>) -> Box<dyn Iterator<Item = Vec<Id>> + Send> {
     if nodes.is_empty() {
         return Box::new([Vec::new()].into_iter());
     }

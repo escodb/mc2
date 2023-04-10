@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::{mpsc, Mutex};
+use std::thread;
 
 use crate::actor::Actor;
 use crate::config::Config;
@@ -23,7 +25,7 @@ pub struct Runner<T> {
 
 impl<T> Runner<T>
 where
-    T: Clone + Debug,
+    T: Clone + Debug + Send,
 {
     pub fn new() -> Runner<T> {
         Runner {
@@ -57,7 +59,7 @@ where
             for scenario in &self.scenarios {
                 let runner = RunnerScenario::new(config.clone(), scenario);
                 let result = runner.run();
-                results.push((scenario.name.clone(), result.is_passed(), result.count()));
+                results.push((scenario.name.clone(), result.is_pass(), result.count()));
             }
             self.results.push((config.clone(), results));
         }
@@ -86,15 +88,15 @@ where
     }
 }
 
-struct RunnerScenario<'a, T> {
+struct RunnerScenario<'s, T> {
     config: Config,
-    scenario: &'a Scenario<T>,
+    scenario: &'s Scenario<T>,
     planner: Planner<T>,
 }
 
 impl<T> RunnerScenario<'_, T>
 where
-    T: Clone + Debug,
+    T: Clone + Send,
 {
     fn new(config: Config, scenario: &Scenario<T>) -> RunnerScenario<T> {
         let mut planner = Planner::new(config.clone());
@@ -107,7 +109,10 @@ where
         }
     }
 
-    fn run(&self) -> TestResult<T> {
+    fn run(&self) -> TestResult<T>
+    where
+        T: Debug,
+    {
         println!("Scenario: {}", self.scenario.name);
 
         let result = self.check_execution();
@@ -133,35 +138,141 @@ where
     }
 
     fn check_execution(&self) -> TestResult<T> {
+        let plans = Mutex::new(Box::new(self.planner.orderings().enumerate()) as PlanQueue<T>);
+        let client_ids: Vec<_> = self.planner.clients().collect();
         let store = self.create_store();
-        let mut count: usize = 0;
 
-        for plan in self.planner.orderings() {
-            count += 1;
-            let state = RefCell::new(store.clone());
+        let mut supervisor = Supervisor {
+            result: mpsc::channel(),
+            aborts: Vec::new(),
+        };
+
+        let mut workers = Vec::new();
+
+        for _ in 0..WORKER_COUNT {
+            let (abort_send, abort_recv) = mpsc::channel();
+
+            let worker = Worker {
+                config: self.config.clone(),
+                plans: &plans,
+                client_ids: &client_ids,
+                store: store.clone(),
+                result_ch: supervisor.result.0.clone(),
+                abort_ch: abort_recv,
+            };
+
+            workers.push(worker);
+            supervisor.aborts.push(abort_send);
+        }
+
+        thread::scope(|scope| {
+            for worker in &mut workers {
+                scope.spawn(|| worker.run());
+            }
+
+            supervisor.collect_result()
+        })
+    }
+}
+
+const WORKER_COUNT: usize = 4;
+
+type PlanQueue<'a, T> = Box<dyn Iterator<Item = (usize, Vec<&'a Act<T>>)> + Send + 'a>;
+
+struct Worker<'a, 'e, T> {
+    config: Config,
+    plans: &'e Mutex<PlanQueue<'a, T>>,
+    client_ids: &'e [&'a str],
+    store: DbStore<T>,
+    result_ch: mpsc::Sender<TestResult<'a, T>>,
+    abort_ch: mpsc::Receiver<()>,
+}
+
+impl<'a, 'e, T> Worker<'a, 'e, T>
+where
+    T: Clone,
+{
+    fn run(&mut self) {
+        let mut result = TestResult::Pass { count: 0 };
+
+        while let Some((n, plan)) = self.next_plan() {
+            if self.abort_ch.try_recv().is_ok() {
+                return;
+            }
+
+            let state = RefCell::new(self.store.clone());
+            let mut actors = self.create_actors(&state);
             let mut checker = Checker::new(&state);
-
-            let mut actors: HashMap<_, _> = self
-                .planner
-                .clients()
-                .map(|name| (name.to_string(), Actor::new(&state, self.config.clone())))
-                .collect();
 
             for (i, act) in plan.iter().enumerate() {
                 actors.get_mut(&act.client_id).unwrap().dispatch(act);
 
                 if let Err(errors) = checker.check() {
-                    return TestResult::Fail {
-                        count,
+                    self.send_result(TestResult::Fail {
+                        count: n + 1,
                         errors,
                         plan,
                         state: state.borrow().clone(),
                         step: i,
-                    };
+                    });
+                    return;
                 }
             }
+            result = TestResult::Pass { count: n + 1 };
         }
-        TestResult::Pass { count }
+        self.send_result(result);
+    }
+
+    fn next_plan(&self) -> Option<(usize, Vec<&'a Act<T>>)> {
+        self.plans.lock().unwrap().next()
+    }
+
+    fn create_actors<'r>(&self, store: &'r RefCell<DbStore<T>>) -> HashMap<String, Actor<'r, T>> {
+        self.client_ids
+            .iter()
+            .map(|name| (name.to_string(), Actor::new(store, self.config.clone())))
+            .collect()
+    }
+
+    fn send_result(&self, result: TestResult<'a, T>) {
+        self.result_ch.send(result).unwrap();
+    }
+}
+
+type Channel<T> = (mpsc::Sender<T>, mpsc::Receiver<T>);
+
+struct Supervisor<'a, T> {
+    result: Channel<TestResult<'a, T>>,
+    aborts: Vec<mpsc::Sender<()>>,
+}
+
+impl<'a, T> Supervisor<'a, T> {
+    fn collect_result(&self) -> TestResult<'a, T> {
+        let mut result = TestResult::Pass { count: 0 };
+        let mut finished = 0;
+
+        for worker_result in &self.result.1 {
+            if worker_result.is_pass() {
+                if worker_result.count() > result.count() {
+                    result = worker_result
+                }
+                finished += 1;
+                if finished == self.aborts.len() {
+                    break;
+                }
+            } else {
+                result = worker_result;
+                self.abort();
+                break;
+            }
+        }
+        result
+    }
+
+    fn abort(&self) {
+        for abort in &self.aborts {
+            abort.send(()).unwrap();
+        }
     }
 }
 
@@ -178,11 +289,8 @@ enum TestResult<'a, T> {
     },
 }
 
-impl<T> TestResult<'_, T>
-where
-    T: Clone + Debug,
-{
-    fn is_passed(&self) -> bool {
+impl<T> TestResult<'_, T> {
+    fn is_pass(&self) -> bool {
         match self {
             TestResult::Pass { .. } => true,
             TestResult::Fail { .. } => false,
@@ -196,8 +304,11 @@ where
         }
     }
 
-    fn print(&self) {
-        let status = if self.is_passed() { "PASS" } else { "FAIL" };
+    fn print(&self)
+    where
+        T: Clone + Debug,
+    {
+        let status = if self.is_pass() { "PASS" } else { "FAIL" };
         println!("    result: {}", status);
         println!("    checked executions: {}", format_number(self.count()));
 

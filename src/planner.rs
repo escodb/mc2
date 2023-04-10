@@ -43,7 +43,7 @@ impl<T> fmt::Debug for Act<T> {
 
 pub enum Op<T> {
     Get,
-    Put(Box<dyn Fn(Option<T>) -> Option<T>>),
+    Put(Box<dyn Fn(Option<T>) -> Option<T> + Sync>),
     Rm,
     List,
     Link(String),
@@ -129,7 +129,7 @@ impl<'a, T> Client<'a, T> {
 
     pub fn update<F>(&mut self, key: &str, update: F)
     where
-        F: Fn(Option<T>) -> Option<T> + 'static,
+        F: Fn(Option<T>) -> Option<T> + Sync + 'static,
     {
         if self.config.update == Update::GetBeforePut {
             self.update_get_before_put(key, update);
@@ -140,7 +140,7 @@ impl<'a, T> Client<'a, T> {
 
     fn update_reads_before_links<F>(&mut self, key: &str, update: F)
     where
-        F: Fn(Option<T>) -> Option<T> + 'static,
+        F: Fn(Option<T>) -> Option<T> + Sync + 'static,
     {
         let path = Path::from(key);
         let reads = self.do_reads(&path);
@@ -159,7 +159,7 @@ impl<'a, T> Client<'a, T> {
 
     fn update_get_before_put<F>(&mut self, key: &str, update: F)
     where
-        F: Fn(Option<T>) -> Option<T> + 'static,
+        F: Fn(Option<T>) -> Option<T> + Sync + 'static,
     {
         let path = Path::from(key);
 
