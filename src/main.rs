@@ -8,8 +8,10 @@ fn main() {
         Config::new().update(Update::GetBeforePut),
         Config::new().remove(Remove::UnlinkParallel),
         Config::new().skip_links(true),
-        Config::new().store(Cas::LaxDelete),
-        Config::new(),
+        Config::new().store(Cas::Lax),
+        Config::new().store(Cas::NoRev),
+        Config::new().store(Cas::MatchRev),
+        Config::new().store(Cas::Strict),
     ]);
 
     runner.add(

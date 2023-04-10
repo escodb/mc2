@@ -13,7 +13,9 @@ pub enum Remove {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cas {
     Strict,
-    LaxDelete,
+    MatchRev,
+    NoRev,
+    Lax,
 }
 
 #[derive(Clone, Debug)]

@@ -26,10 +26,6 @@ where
         }
     }
 
-    fn is_strict(&self) -> bool {
-        self.config.store == Cas::Strict
-    }
-
     pub fn get<Q>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
@@ -47,7 +43,7 @@ where
         K: Borrow<Q>,
         Q: Ord + ?Sized,
     {
-        if self.is_strict() {
+        if self.config.store == Cas::Strict || self.config.store == Cas::MatchRev {
             if let Some((rev, value)) = self.data.get(key) {
                 Some((*rev, value.clone()))
             } else {
@@ -72,11 +68,20 @@ where
 
     fn set_key(&mut self, key: K, rev: Option<Rev>, value: Option<V>) -> Option<Rev> {
         let client_rev = rev.unwrap_or(0);
-        let is_strict = self.is_strict();
         let entry = self.data.entry(key).or_insert((0, None));
 
-        if (is_strict || entry.1.is_some()) && entry.0 != client_rev {
-            return None;
+        if entry.1.is_some() || self.config.store == Cas::Strict {
+            if client_rev != entry.0 {
+                return None;
+            }
+        } else if self.config.store == Cas::MatchRev {
+            if client_rev != 0 && client_rev != entry.0 {
+                return None;
+            }
+        } else if self.config.store == Cas::NoRev {
+            if client_rev != 0 {
+                return None;
+            }
         }
 
         *entry = (entry.0 + 1, value);
@@ -192,9 +197,9 @@ mod tests {
     #[test]
     fn does_not_update_a_value_with_a_bad_rev() {
         let mut store: Store<String, _> = Store::new(Config::new());
-        let rev = store.write("x".into(), None, 'a').unwrap();
+        let rev = store.write("x".into(), None, 'a');
 
-        assert_eq!(store.write("x".into(), Some(rev + 1), 'b'), None);
+        assert_eq!(store.write("x".into(), rev.map(|r| r + 1), 'b'), None);
         assert_eq!(store.seq, 1);
         assert_eq!(store.read("x"), Some((1, Some('a'))));
     }
@@ -202,9 +207,9 @@ mod tests {
     #[test]
     fn updates_a_value_with_a_matching_rev() {
         let mut store: Store<String, _> = Store::new(Config::new());
-        let rev = store.write("x".into(), None, 'a').unwrap();
+        let rev = store.write("x".into(), None, 'a');
 
-        assert_eq!(store.write("x".into(), Some(rev), 'b'), Some(2));
+        assert_eq!(store.write("x".into(), rev, 'b'), Some(2));
         assert_eq!(store.seq, 2);
         assert_eq!(store.read("x"), Some((2, Some('b'))));
     }
@@ -212,39 +217,190 @@ mod tests {
     #[test]
     fn removes_a_value() {
         let mut store: Store<String, _> = Store::new(Config::new());
-        let rev = store.write("x".into(), None, 'a').unwrap();
+        let rev = store.write("x".into(), None, 'a');
 
-        assert_eq!(store.remove("x".into(), Some(rev)), Some(2));
+        assert_eq!(store.remove("x".into(), rev), Some(2));
         assert_eq!(store.read("x"), Some((2, None)));
     }
 
-    #[test]
-    fn does_not_allow_stale_write_after_remove() {
-        let mut store: Store<String, _> = Store::new(Config::new());
-        let rev = store.write("x".into(), None, 'a').unwrap();
+    mod strict_mode {
+        use super::*;
 
-        assert_eq!(store.remove("x".into(), Some(rev)), Some(2));
-        assert_eq!(store.write("x".into(), None, 'b'), None);
-        assert_eq!(store.read("x"), Some((2, None)));
+        const MODE: Cas = Cas::Strict;
+
+        #[test]
+        fn returns_a_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.read("x"), Some((2, None)));
+        }
+
+        #[test]
+        fn does_not_allow_write_with_no_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), None, 'b'), None);
+            assert_eq!(store.read("x"), Some((2, None)));
+        }
+
+        #[test]
+        fn allows_write_with_matching_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), Some(2), 'b'), Some(3));
+            assert_eq!(store.read("x"), Some((3, Some('b'))));
+        }
+
+        #[test]
+        fn does_not_allow_write_with_non_matching_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), Some(99), 'b'), None);
+            assert_eq!(store.read("x"), Some((2, None)));
+        }
     }
 
-    #[test]
-    fn in_lax_mode_does_not_return_a_rev_after_remove() {
-        let mut store: Store<String, _> = Store::new(Config::new().store(Cas::LaxDelete));
-        let rev = store.write("x".into(), None, 'a').unwrap();
+    mod match_rev_mode {
+        use super::*;
 
-        assert_eq!(store.remove("x".into(), Some(rev)), Some(2));
-        assert_eq!(store.read("x"), None);
+        const MODE: Cas = Cas::MatchRev;
+
+        #[test]
+        fn returns_a_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.read("x"), Some((2, None)));
+        }
+
+        #[test]
+        fn allows_write_with_no_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), None, 'b'), Some(3));
+            assert_eq!(store.read("x"), Some((3, Some('b'))));
+        }
+
+        #[test]
+        fn allows_write_with_matching_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), Some(2), 'b'), Some(3));
+            assert_eq!(store.read("x"), Some((3, Some('b'))));
+        }
+
+        #[test]
+        fn does_not_allow_write_with_non_matching_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), Some(99), 'b'), None);
+            assert_eq!(store.read("x"), Some((2, None)));
+        }
     }
 
-    #[test]
-    fn in_lax_mode_allows_stale_write_after_remove() {
-        let mut store: Store<String, _> = Store::new(Config::new().store(Cas::LaxDelete));
-        let rev = store.write("x".into(), None, 'a').unwrap();
+    mod no_rev_mode {
+        use super::*;
 
-        assert_eq!(store.remove("x".into(), Some(rev)), Some(2));
-        assert_eq!(store.write("x".into(), None, 'b'), Some(3));
-        assert_eq!(store.read("x"), Some((3, Some('b'))));
+        const MODE: Cas = Cas::NoRev;
+
+        #[test]
+        fn does_not_return_a_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.read("x"), None);
+        }
+
+        #[test]
+        fn allows_write_with_no_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), None, 'b'), Some(3));
+            assert_eq!(store.read("x"), Some((3, Some('b'))));
+        }
+
+        #[test]
+        fn does_not_allow_write_with_matching_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), Some(2), 'b'), None);
+            assert_eq!(store.read("x"), None);
+        }
+
+        #[test]
+        fn does_not_allow_write_with_non_matching_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), Some(99), 'b'), None);
+            assert_eq!(store.read("x"), None);
+        }
+    }
+
+    mod lax_mode {
+        use super::*;
+
+        const MODE: Cas = Cas::Lax;
+
+        #[test]
+        fn does_not_return_a_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.read("x"), None);
+        }
+
+        #[test]
+        fn allows_write_with_no_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), None, 'b'), Some(3));
+            assert_eq!(store.read("x"), Some((3, Some('b'))));
+        }
+
+        #[test]
+        fn allows_write_with_matching_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), Some(2), 'b'), Some(3));
+            assert_eq!(store.read("x"), Some((3, Some('b'))));
+        }
+
+        #[test]
+        fn allows_write_with_non_matching_rev_after_remove() {
+            let mut store: Store<String, _> = Store::new(Config::new().store(MODE));
+            let rev = store.write("x".into(), None, 'a');
+
+            assert_eq!(store.remove("x".into(), rev), Some(2));
+            assert_eq!(store.write("x".into(), Some(99), 'b'), Some(3));
+            assert_eq!(store.read("x"), Some((3, Some('b'))));
+        }
     }
 
     #[test]
