@@ -215,7 +215,12 @@ impl<'a, T> Client<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::cell::RefCell;
+
+    use crate::actor::Actor;
     use crate::config::Update;
+    use crate::db::{Db, DbStore};
     use crate::graph::tests::check_graph;
 
     #[test]
@@ -227,6 +232,73 @@ mod tests {
 
         let clients: Vec<_> = planner.clients().collect();
         assert_eq!(clients, ["alice", "bob"]);
+    }
+
+    #[test]
+    fn produces_instructions_to_create_a_document() {
+        let mut planner: Planner<Vec<char>> = Planner::new(Config::new());
+        planner
+            .client("A")
+            .update("/path/x.json", |_| Some(vec!['a']));
+
+        let store = RefCell::new(DbStore::new(Config::new()));
+        let mut actor = Actor::new(&store, Config::new());
+
+        for act in planner.orderings().next().unwrap() {
+            actor.dispatch(act);
+        }
+
+        let s = store.into_inner();
+
+        assert_eq!(s.read("/"), Some((1, Some(Db::dir_from(&["path/"])))));
+        assert_eq!(s.read("/path/"), Some((1, Some(Db::dir_from(&["x.json"])))));
+        assert_eq!(s.read("/path/x.json"), Some((1, Some(Db::Doc(vec!['a'])))));
+    }
+
+    #[test]
+    fn produces_instructions_to_update_a_document() {
+        let mut planner: Planner<(char, usize)> = Planner::new(Config::new());
+        planner
+            .client("A")
+            .update("/path/x.json", |_| Some(('a', 50)));
+        planner
+            .client("B")
+            .update("/path/x.json", |doc| doc.map(|(c, n)| (c, n + 3)));
+
+        let store = RefCell::new(DbStore::new(Config::new()));
+        let mut actor = Actor::new(&store, Config::new());
+
+        for act in planner.orderings().next().unwrap() {
+            actor.dispatch(act);
+        }
+
+        let s = store.into_inner();
+
+        assert_eq!(s.read("/"), Some((2, Some(Db::dir_from(&["path/"])))));
+        assert_eq!(s.read("/path/"), Some((2, Some(Db::dir_from(&["x.json"])))));
+        assert_eq!(s.read("/path/x.json"), Some((2, Some(Db::Doc(('a', 53))))));
+    }
+
+    #[test]
+    fn produces_instructions_to_remove_a_document() {
+        let mut planner: Planner<(char, usize)> = Planner::new(Config::new());
+        planner
+            .client("A")
+            .update("/path/x.json", |_| Some(('a', 50)));
+        planner.client("B").remove("/path/x.json");
+
+        let store = RefCell::new(DbStore::new(Config::new()));
+        let mut actor = Actor::new(&store, Config::new());
+
+        for act in planner.orderings().next().unwrap() {
+            actor.dispatch(act);
+        }
+
+        let s = store.into_inner();
+
+        assert_eq!(s.read("/"), Some((2, Some(Db::dir_from(&[])))));
+        assert_eq!(s.read("/path/"), Some((2, Some(Db::dir_from(&[])))));
+        assert_eq!(s.read("/path/x.json"), Some((2, None)));
     }
 
     #[test]
