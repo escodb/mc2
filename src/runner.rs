@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Mutex;
+use std::thread;
 
 use crate::actor::Actor;
 use crate::config::Config;
@@ -11,8 +13,8 @@ const SPLIT: &str = "===========================================================
 
 struct Scenario<T> {
     name: String,
-    init: Box<dyn Fn(Client<T>)>,
-    plan: Box<dyn Fn(&mut Planner<T>)>,
+    init: Box<dyn Fn(Client<T>) + Sync>,
+    plan: Box<dyn Fn(&mut Planner<T>) + Sync>,
 }
 
 pub struct Runner<T> {
@@ -23,7 +25,7 @@ pub struct Runner<T> {
 
 impl<T> Runner<T>
 where
-    T: Clone + Debug,
+    T: Clone + Debug + Send + Sync,
 {
     pub fn new() -> Runner<T> {
         Runner {
@@ -39,8 +41,8 @@ where
 
     pub fn add<S, R>(&mut self, name: &str, setup: S, run: R)
     where
-        S: Fn(Client<T>) + 'static,
-        R: Fn(&mut Planner<T>) + 'static,
+        S: Fn(Client<T>) + Sync + 'static,
+        R: Fn(&mut Planner<T>) + Sync + 'static,
     {
         self.scenarios.push(Scenario {
             name: name.to_string(),
@@ -94,7 +96,7 @@ struct RunnerScenario<'s, T> {
 
 impl<T> RunnerScenario<'_, T>
 where
-    T: Clone + Debug,
+    T: Clone + Debug + Send + Sync,
 {
     fn new(config: Config, scenario: &Scenario<T>) -> RunnerScenario<T> {
         let mut planner = Planner::new(config.clone());
@@ -134,36 +136,69 @@ where
 
     fn check_execution(&self) -> TestResult<T> {
         let store = self.create_store();
-        let mut count: usize = 0;
+        let plans = Mutex::new(Box::new(self.planner.orderings().enumerate()) as PlanQueue<T>);
 
-        for plan in self.planner.orderings() {
-            count += 1;
-            let state = RefCell::new(store.clone());
-            let mut checker = Checker::new(&state);
+        thread::scope(|scope| {
+            let mut workers = Vec::new();
 
-            let mut actors: HashMap<_, _> = self
-                .planner
-                .clients()
-                .map(|name| (name.to_string(), Actor::new(&state, self.config.clone())))
-                .collect();
+            for _ in 0..WORKER_COUNT {
+                let worker = scope.spawn(|| {
+                    let mut result = TestResult::Pass { count: 0 };
 
-            for (i, act) in plan.iter().enumerate() {
-                actors.get_mut(&act.client_id).unwrap().dispatch(act);
+                    while let Some((n, plan)) = next_plan(&plans) {
+                        let state = RefCell::new(store.clone());
+                        let mut checker = Checker::new(&state);
 
-                if let Err(errors) = checker.check() {
-                    return TestResult::Fail {
-                        count,
-                        errors,
-                        plan,
-                        state: state.borrow().clone(),
-                        step: i,
-                    };
+                        let mut actors: HashMap<_, _> = self
+                            .planner
+                            .clients()
+                            .map(|name| (name.to_string(), Actor::new(&state, self.config.clone())))
+                            .collect();
+
+                        for (i, act) in plan.iter().enumerate() {
+                            actors.get_mut(&act.client_id).unwrap().dispatch(act);
+
+                            if let Err(errors) = checker.check() {
+                                return TestResult::Fail {
+                                    count: n + 1,
+                                    errors,
+                                    plan,
+                                    state: state.borrow().clone(),
+                                    step: i,
+                                };
+                            }
+                        }
+                        result = TestResult::Pass { count: n + 1 };
+                    }
+                    result
+                });
+                workers.push(worker);
+            }
+
+            let mut result = TestResult::Pass { count: 0 };
+
+            for worker in workers {
+                let worker_result = worker.join().unwrap();
+                if worker_result.is_pass() {
+                    if worker_result.count() > result.count() {
+                        result = worker_result;
+                    }
+                } else {
+                    return worker_result;
                 }
             }
-        }
-        TestResult::Pass { count }
+            result
+        })
     }
 }
+
+type PlanQueue<'a, T> = Box<dyn Iterator<Item = (usize, Vec<&'a Act<T>>)> + Send + 'a>;
+
+fn next_plan<'a, T>(plans: &Mutex<PlanQueue<'a, T>>) -> Option<(usize, Vec<&'a Act<T>>)> {
+    plans.lock().unwrap().next()
+}
+
+const WORKER_COUNT: usize = 4;
 
 enum TestResult<'a, T> {
     Pass {
