@@ -86,9 +86,9 @@ where
     }
 }
 
-struct RunnerScenario<'a, T> {
+struct RunnerScenario<'s, T> {
     config: Config,
-    scenario: &'a Scenario<T>,
+    scenario: &'s Scenario<T>,
     planner: Planner<T>,
 }
 
