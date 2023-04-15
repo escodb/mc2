@@ -6,7 +6,7 @@ fn main() {
 
     runner.configs(&[
         Config::new().update(Update::GetBeforePut),
-        Config::new().remove(Remove::UnlinkParallel),
+        // Config::new().remove(Remove::UnlinkParallel),
         Config::new().skip_links(true),
         Config::new().store(Cas::Lax),
         Config::new().store(Cas::NoRev),
@@ -55,6 +55,18 @@ fn main() {
         |planner| {
             planner.client("A").update("/path/y", |_| Some(('y', 2)));
             planner.client("B").remove("/path/y");
+        },
+    );
+
+    runner.add(
+        "one update, two deletes",
+        |mut db| {
+            db.update("/path/x", |_| Some(('x', 1)));
+        },
+        |planner| {
+            planner.client("A").update("/path/x", |_| Some(('x', 2)));
+            planner.client("B").remove("/path/x");
+            planner.client("C").remove("/path/x");
         },
     );
 
