@@ -52,7 +52,7 @@ where
         }
     }
 
-    fn get(&mut self, path: &Path) -> Option<T> {
+    pub fn get(&mut self, path: &Path) -> Option<T> {
         if self.crashed {
             return None;
         }
@@ -63,7 +63,7 @@ where
         }
     }
 
-    fn put<F>(&mut self, path: &Path, update: F)
+    pub fn put<F>(&mut self, path: &Path, update: F)
     where
         F: Fn(Option<T>) -> Option<T>,
     {
@@ -74,7 +74,7 @@ where
         }
     }
 
-    fn rm(&mut self, path: &Path) {
+    pub fn rm(&mut self, path: &Path) {
         if self.crashed || self.get(path).is_none() {
             return;
         }
@@ -95,7 +95,7 @@ where
         }
     }
 
-    fn list<'a, P>(&mut self, path: &'a P) -> Option<BTreeSet<String>>
+    pub fn list<'a, P>(&mut self, path: &'a P) -> Option<BTreeSet<String>>
     where
         Path: Borrow<P>,
         P: Ord + ?Sized,
@@ -111,7 +111,7 @@ where
         }
     }
 
-    fn link(&mut self, path: &Path, entry: &str) {
+    pub fn link(&mut self, path: &Path, entry: &str) {
         if !self.crashed {
             let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
             if !self.config.skip_links || !entries.contains(entry) {
@@ -121,7 +121,7 @@ where
         }
     }
 
-    fn unlink(&mut self, path: &Path, entry: &str) {
+    pub fn unlink(&mut self, path: &Path, entry: &str) {
         if !self.crashed && self.unlinks.contains(path.full()) {
             let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
             entries.remove(entry);
