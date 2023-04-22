@@ -11,7 +11,6 @@ pub enum Db<T> {
 }
 
 impl<T> Db<T> {
-    #[cfg(test)]
     pub fn dir_from(entries: &[&str]) -> Db<T> {
         let set = entries.iter().map(|s| s.to_string()).collect();
         Db::Dir(set)
