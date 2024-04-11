@@ -17,10 +17,13 @@ struct Scenario<T> {
     plan: Box<dyn Fn(&mut Planner<T>)>,
 }
 
+type Outcome = (String, bool, usize);
+
+#[derive(Default)]
 pub struct Runner<T> {
     configs: Vec<Config>,
     scenarios: Vec<Scenario<T>>,
-    results: Vec<(Config, Vec<(String, bool, usize)>)>,
+    results: Vec<(Config, Vec<Outcome>)>,
 }
 
 impl<T> Runner<T>
@@ -70,7 +73,7 @@ where
         println!("{}", SPLIT);
         println!("SUMMARY");
         println!("{}", SPLIT);
-        println!("");
+        println!();
 
         let mut total = 0;
 
@@ -81,10 +84,10 @@ where
                 total += count;
                 println!("    - {} ({}): {}", status, format_number(*count), name);
             }
-            println!("");
+            println!();
         }
         println!("Total executions checked = {}", format_number(total));
-        println!("");
+        println!();
     }
 }
 
@@ -118,7 +121,7 @@ where
         let result = self.check_execution();
         result.print();
 
-        println!("");
+        println!();
 
         result
     }

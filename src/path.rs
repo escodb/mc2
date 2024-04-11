@@ -35,7 +35,7 @@ impl PartialEq for Path {
 
 impl PartialOrd for Path {
     fn partial_cmp(&self, other: &Path) -> Option<std::cmp::Ordering> {
-        self.original.partial_cmp(&other.original)
+        Some(self.cmp(other))
     }
 }
 

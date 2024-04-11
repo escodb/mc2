@@ -111,7 +111,8 @@ where
 
     pub fn link(&mut self, path: &Path, entry: &str) {
         if !self.crashed {
-            let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
+            let mut entries = self.list(path).unwrap_or_default();
+
             if !self.config.skip_links || !entries.contains(entry) {
                 entries.insert(entry.to_string());
                 self.write(path, Db::Dir(entries));
@@ -121,7 +122,7 @@ where
 
     pub fn unlink(&mut self, path: &Path, entry: &str) {
         if !self.crashed && self.unlinks.contains(path.full()) {
-            let mut entries = self.list(path).unwrap_or_else(|| BTreeSet::new());
+            let mut entries = self.list(path).unwrap_or_default();
             entries.remove(entry);
             self.write(path, Db::Dir(entries));
         }

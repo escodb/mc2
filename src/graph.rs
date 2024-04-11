@@ -1,6 +1,6 @@
 pub type Id = usize;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Graph<T> {
     nodes: Vec<Node<T>>,
 }

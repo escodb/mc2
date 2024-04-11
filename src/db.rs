@@ -48,7 +48,7 @@ where
 
         for path in store.keys() {
             if path.is_doc() && store.get(path).is_some() {
-                self.check_doc(&path);
+                self.check_doc(path);
             }
         }
 

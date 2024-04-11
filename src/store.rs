@@ -49,12 +49,10 @@ where
             } else {
                 None
             }
+        } else if let Some((rev, Some(value))) = self.data.get(key) {
+            Some((*rev, Some(value.clone())))
         } else {
-            if let Some((rev, Some(value))) = self.data.get(key) {
-                Some((*rev, Some(value.clone())))
-            } else {
-                None
-            }
+            None
         }
     }
 
@@ -147,7 +145,7 @@ where
         let old_rev = self.get_rev(key);
         let mut store = self.store.borrow_mut();
 
-        if let Some(_) = store.remove(key.clone(), old_rev) {
+        if store.remove(key.clone(), old_rev).is_some() {
             self.data.insert(key.clone(), None);
             true
         } else {
