@@ -1,14 +1,14 @@
 # mc2
 
 This is a special-purpose model checker that verifies the implementation
-constraints discussed in [the design of VaultDB][1]. It simulates the behaviour
+constraints discussed in [the design of EscoDB][1]. It simulates the behaviour
 of sets of clients concurrently interacting with a data store, executing every
 possible ordering of effects and checking whether each execution causes any
 consistency violations. We use this to confirm the analysis of the design
 document and to discover behavioural requirements that clients and data stores
 must abide by for the design to work correctly.
 
-[1]: https://github.com/vault-db/design
+[1]: https://escodb.github.io/design/
 
 
 ## Usage
@@ -29,7 +29,7 @@ settings.
 ## Implementation
 
 The model checker is composed of a number of components that simulate the
-behaviour of storage servers and VaultDB clients. Some of these components allow
+behaviour of storage servers and EscoDB clients. Some of these components allow
 the actions of some agent to be specified in terms of a dependency graph so that
 all possible orderings of events can be generated from this graph. The
 components of the system are explained below.
@@ -37,7 +37,7 @@ components of the system are explained below.
 
 ### Storage
 
-VaultDB is designed to work on top of a blob store with [compare-and-swap][3]
+EscoDB is designed to work on top of a blob store with [compare-and-swap][3]
 (CAS) behaviour. In typical implementations this is accomplished by associating
 a version ID with each stored item, that ID being an incrementing counter, a
 content hash, or combination of the two. In our model, a counter is used. All
@@ -142,8 +142,8 @@ is configurable. A full description of the `Config` API is given below.
 
 ### Paths and values
 
-In VaultDB, the keys of the store are _paths_, analogous to filesystem paths,
-and the values are either _documents_ (the primary content being stored by the
+In EscoDB, the keys of the store are _paths_, analogous to filesystem paths, and
+the values are either _documents_ (the primary content being stored by the
 system) or _directories_ (lists of items that exist under a certain directory
 path). A consistency requirement is that for any document that exists, its path
 must be fully represented by links in its parent directories.
@@ -171,7 +171,7 @@ For performance reasons, these sets of links are cached inside the `Path` object
 and are not recalculated for each call to `links()`.
 
 The values stored during model checking are represented by the enum `Db<T>`
-which is either `Doc(T)` or `Dir(BTreeSet<String>)`. So the full type of VaultDB
+which is either `Doc(T)` or `Dir(BTreeSet<String>)`. So the full type of EscoDB
 stores is `Store<Path, Db<T>>`.
 
 
@@ -182,7 +182,7 @@ The behaviour of client processes interacting with a `Store` is modelled by
 responses it's received from a `Store`, keeping track of the latest version ID
 and value it saw for each key. An `Actor<T>` interacts with a `Store<Path, Db<T:
 Clone>>` and has the following methods that correspond with the low-level item
-operations in the VaultDB design.
+operations in the EscoDB design.
 
 - `get(path: &Path) -> Option<T>`: loads the given document and its version ID
   from the store.
@@ -274,7 +274,7 @@ actor.get(&path)            //    Some(('a', 1))
 
 Above we gave an example of performing an `update()` for a document using the
 `get()`, `put()`, `list()` and `link()` operations. This implementation performs
-all operations sequentially, but in VaultDB we would like to perform as many of
+all operations sequentially, but in EscoDB we would like to perform as many of
 these operations as possible concurrently to reduce latency. We also need to
 make sure that when multiple clients access the storage at the same time, that
 they behave in a way that will not create consistency violations.
@@ -385,7 +385,7 @@ we mark that scenario a success.
 
 ### Consistency checks
 
-The key consistency requirement for VaultDB is that, following any write, every
+The key consistency requirement for EscoDB is that, following any write, every
 existing document path must have a chain of links leading to it in its parent
 directories. That is, if a doc exists at `/path/to/x`:
 
