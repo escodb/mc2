@@ -101,7 +101,7 @@ impl<T> RunnerScenario<'_, T>
 where
     T: Clone + Send,
 {
-    fn new(config: Config, scenario: &Scenario<T>) -> RunnerScenario<T> {
+    fn new(config: Config, scenario: &Scenario<T>) -> RunnerScenario<'_, T> {
         let mut planner = Planner::new(config.clone());
         (scenario.plan)(&mut planner);
 
@@ -112,7 +112,7 @@ where
         }
     }
 
-    fn run(&self) -> TestResult<T>
+    fn run(&self) -> TestResult<'_, T>
     where
         T: Debug,
     {
@@ -140,7 +140,7 @@ where
         store.into_inner()
     }
 
-    fn check_execution(&self) -> TestResult<T> {
+    fn check_execution(&self) -> TestResult<'_, T> {
         let plans = Mutex::new(Box::new(self.planner.orderings().enumerate()) as PlanQueue<T>);
         let client_ids: Vec<_> = self.planner.clients().collect();
         let store = self.create_store();

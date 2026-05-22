@@ -77,7 +77,7 @@ impl<T> Planner<T> {
         }
     }
 
-    pub fn client(&mut self, id: &str) -> Client<T> {
+    pub fn client(&mut self, id: &str) -> Client<'_, T> {
         self.clients.insert(id.to_string());
         Client::new(&mut self.graph, id, self.config.clone())
     }

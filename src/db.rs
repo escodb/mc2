@@ -30,7 +30,7 @@ impl<T> Checker<'_, T>
 where
     T: Clone,
 {
-    pub fn new(store: &RefCell<DbStore<T>>) -> Checker<T> {
+    pub fn new(store: &RefCell<DbStore<T>>) -> Checker<'_, T> {
         Checker {
             store,
             seq: 0,

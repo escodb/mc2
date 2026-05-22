@@ -18,7 +18,7 @@ impl<T> Actor<'_, T>
 where
     T: Clone,
 {
-    pub fn new(store: &RefCell<DbStore<T>>, config: Config) -> Actor<T> {
+    pub fn new(store: &RefCell<DbStore<T>>, config: Config) -> Actor<'_, T> {
         Actor {
             cache: DbCache::new(store),
             config,

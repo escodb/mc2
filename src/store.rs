@@ -103,7 +103,7 @@ where
     K: Clone + Ord,
     V: Clone,
 {
-    pub fn new(store: &RefCell<Store<K, V>>) -> Cache<K, V> {
+    pub fn new(store: &RefCell<Store<K, V>>) -> Cache<'_, K, V> {
         Cache {
             store,
             data: BTreeMap::new(),
